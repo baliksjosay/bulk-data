@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>New Reply to Your Comment</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0a0a0a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0a0a0a;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #1a1a1a; border-radius: 12px;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+              <div style="font-size: 48px; margin-bottom: 10px;">💬</div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px;">New Reply</h1>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <p style="margin: 0 0 10px; color: #888; font-size: 14px;">
+                <strong style="color: #667eea;">{{commenterUsername}}</strong> replied to your comment:
+              </p>
+
+              <!-- Original Comment -->
+              {{#if originalComment}}
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #2a2a2a; border-left: 4px solid #555; border-radius: 8px; margin: 15px 0;">
+                <tr>
+                  <td style="padding: 15px;">
+                    <p style="margin: 0; color: #888; font-size: 12px; text-transform: uppercase; margin-bottom: 5px;">Your Comment</p>
+                    <p style="margin: 0; color: #b0b0b0; font-size: 14px; line-height: 1.6; font-style: italic;">
+                      "{{originalComment}}"
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+
+              <!-- Reply -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #2a2a2a; border-left: 4px solid #667eea; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0; color: #e0e0e0; font-size: 15px; line-height: 1.6;">
+                      "{{replyContent}}"
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              {{#if actionUrl}}
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top: 30px;">
+                <tr>
+                  <td align="center">
+                    <a href="{{actionUrl}}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                      View & Reply
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #0f0f0f; padding: 30px; text-align: center; border-top: 1px solid #2a2a2a;">
+              <p style="margin: 0; color: #888; font-size: 14px;">
+                © {{year}} {{appName}}. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

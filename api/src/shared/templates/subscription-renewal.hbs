@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Subscription Activated</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0a0a0a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0a0a0a;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #1a1a1a; border-radius: 12px;">
+          
+          <!-- Success Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 40px 30px; text-align: center;">
+              <div style="font-size: 48px; margin-bottom: 10px;">🎉</div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px;">Subscription Activated!</h1>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <p style="margin: 0 0 20px; color: #e0e0e0; font-size: 16px; line-height: 1.6;">
+                Hi {{userName}},
+              </p>
+
+              <p style="margin: 0 0 30px; color: #e0e0e0; font-size: 16px; line-height: 1.6;">
+                Your <strong style="color: #38ef7d;">{{planName}}</strong> subscription has been successfully activated.
+              </p>
+
+              <!-- Subscription Info Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #2a2a2a; border-radius: 8px; margin-bottom: 30px;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%">
+                      <tr>
+                        <td style="color: #888; font-size: 14px; padding: 8px 0;">Plan:</td>
+                        <td style="color: #fff; font-size: 14px; font-weight: 600; text-align: right;">{{planName}}</td>
+                      </tr>
+                      {{#if amount}}
+                      <tr>
+                        <td style="color: #888; font-size: 14px; padding: 8px 0;">Amount:</td>
+                        <td style="color: #38ef7d; font-size: 14px; font-weight: 600; text-align: right;">{{amount}} {{currency}}</td>
+                      </tr>
+                      {{/if}}
+                      {{#if nextBillingDate}}
+                      <tr>
+                        <td style="color: #888; font-size: 14px; padding: 8px 0;">Next Billing:</td>
+                        <td style="color: #fff; font-size: 14px; font-weight: 600; text-align: right;">{{nextBillingDate}}</td>
+                      </tr>
+                      {{/if}}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0 0 30px; color: #b0b0b0; font-size: 15px;">
+                You now have access to all premium features including unlimited video streaming, HD quality, and exclusive content.
+              </p>
+
+              {{#if actionUrl}}
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{actionUrl}}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                      View Subscription
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #0f0f0f; padding: 30px; text-align: center; border-top: 1px solid #2a2a2a;">
+              <p style="margin: 0 0 10px; color: #888; font-size: 14px;">
+                © {{year}} {{appName}}. All rights reserved.
+              </p>
+              <p style="margin: 0; color: #666; font-size: 12px;">
+                <a href="{{baseUrl}}/account/subscriptions" style="color: #38ef7d; text-decoration: none;">Manage Subscription</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

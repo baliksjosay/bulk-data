@@ -1,0 +1,37 @@
+I reviewed `/Users/baliksjosay/Downloads/bulkdata.json` against our current contract in `frontend/docs/openapi.yaml` and the API code.
+
+This backend spec should not replace our current OpenAPI contract as-is. It is useful only as a partial upstream reference.
+
+**Can Use**
+- Some basic customer fields: `businessName`, `businessRegistrationNumber`, `businessEmail`, phone, APN name/id.
+- Basic customer operations: create customer, add primary, add secondary.
+- Basic bundle create shape: name, description, volume, amount, currency, validity.
+- Basic admin/user lifecycle hints: create admin, status change, approval status.
+- Basic auth hints around password + OTP flow.
+- Server reference: `http://10.156.42.7:8819`, but note this differs from the provisioning API you gave earlier: `http://10.156.42.7:9040`.
+
+**Cannot Use As-Is**
+- User create requires `username` in both `CreateAdminUserRequest` and `UserRequest`. We should reject that. User creation should use email/profile/role fields; username is not needed.
+- Paths are not REST-clean: `/api/v1/user/create`, `/api/v1/customer/add-primary`, `/api/v1/bundle/create`. Our current API uses `/api/users`, `/api/customers`, `/api/bundles`, etc.
+- Auth endpoints are marked as bearer-protected, including login/register/forgot-password. That is wrong; those must be public.
+- Response models are weak. Several create endpoints return the request DTO instead of the created resource.
+- No standard success/error envelope, no reusable error schema, no pagination metadata.
+- `User` schema exposes `password`; that must not be in any response contract.
+- Uses `username` as identifier for status/password flows. Prefer `userId` for admin operations and email/phone for recovery/login flows.
+- Phone validation is too loose: `\d+` with 10-15 length. We need Uganda MTN E.164 normalization/validation.
+
+**Major Missing Pieces**
+- No payment initiation journey for card/PRN/mobile money/airtime.
+- No payment session, transaction, callback, retry, confirmation, expiry, or websocket tracking.
+- No renewal/autorenew journey.
+- No dashboard overview, reports, audit, preferences, MFA configuration, WebAuthn devices, sessions.
+- No service request journey.
+- No customer get/list/update/deactivate/reactivate routes matching our current frontend needs.
+- No secondary number usage or balance routes.
+- No provisioning endpoints for group-member/bulk/delete/subscription/subscriber as currently modeled.
+- No activation-link flow: activation OTP, OTP verify, password setup, immediate portal access.
+
+**Username Decision**
+Our current `CreateUserDto` already does not require `username`: [create-user.dto.ts](/Users/baliksjosay/Documents/projects/mtn/bulk-data/api/src/modules/users/dto/create-user.dto.ts:20). That is correct. The backend spec needs to be changed so user creation does not require or send `username`.
+
+Keep this spec as a rough draft, but align it to our existing `frontend/docs/openapi.yaml` contract before integration.

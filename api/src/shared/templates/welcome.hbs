@@ -1,0 +1,147 @@
+{{!-- src/shared/templates/email/welcome.hbs --}}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome to {{appName}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0a0a0a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0a0a0a;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #1a1a1a; border-radius: 12px;">
+          
+          <!-- Welcome Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+              <div style="font-size: 48px; margin-bottom: 10px;">🎉</div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px;">Welcome to {{appName}}!</h1>
+            </td>
+          </tr>
+
+          <!-- Hero Image (Optional) -->
+          <tr>
+            <td style="padding: 0;">
+              <img src="{{baseUrl}}/assets/welcome-banner.jpg" alt="Welcome" style="width: 100%; height: auto; display: block;" />
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <p style="margin: 0 0 20px; color: #e0e0e0; font-size: 16px; line-height: 1.6;">
+                Hi {{userName}},
+              </p>
+
+              <p style="margin: 0 0 30px; color: #e0e0e0; font-size: 16px; line-height: 1.6;">
+                We're thrilled to have you join our community! Your account has been successfully created, and you're now ready to explore everything {{appName}} has to offer.
+              </p>
+
+              <!-- Features Section -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 30px;">
+                <tr>
+                  <td style="padding-bottom: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width: 60px; vertical-align: top; padding-top: 5px;">
+                          <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">🎬</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <h3 style="margin: 0 0 5px; color: #fff; font-size: 16px; font-weight: 600;">Unlimited Streaming</h3>
+                          <p style="margin: 0; color: #888; font-size: 14px; line-height: 1.6;">Access thousands of premium videos in HD quality</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding-bottom: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width: 60px; vertical-align: top; padding-top: 5px;">
+                          <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">🔴</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <h3 style="margin: 0 0 5px; color: #fff; font-size: 16px; font-weight: 600;">Live Events</h3>
+                          <p style="margin: 0; color: #888; font-size: 14px; line-height: 1.6;">Join interactive live streams and connect with creators</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="width: 60px; vertical-align: top; padding-top: 5px;">
+                          <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">⭐</div>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <h3 style="margin: 0 0 5px; color: #fff; font-size: 16px; font-weight: 600;">Exclusive Content</h3>
+                          <p style="margin: 0; color: #888; font-size: 14px; line-height: 1.6;">Discover exclusive content from top creators</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0 0 30px; color: #b0b0b0; font-size: 15px;">
+                Ready to get started? Click below to explore your dashboard and customize your experience.
+              </p>
+
+              <!-- CTA Button -->
+              {{#if dashboardUrl}}
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{dashboardUrl}}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                      Go to Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+            </td>
+          </tr>
+
+          <!-- Help Section -->
+          <tr>
+            <td style="background-color: #0f0f0f; padding: 30px; border-top: 1px solid #2a2a2a;">
+              <p style="margin: 0 0 15px; color: #888; font-size: 14px; text-align: center;">
+                Need help getting started?
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{baseUrl}}/help" style="display: inline-block; margin: 0 10px; color: #667eea; text-decoration: none; font-size: 14px;">Help Center</a>
+                    <span style="color: #444;">•</span>
+                    <a href="{{baseUrl}}/guide" style="display: inline-block; margin: 0 10px; color: #667eea; text-decoration: none; font-size: 14px;">Quick Start Guide</a>
+                    <span style="color: #444;">•</span>
+                    <a href="{{baseUrl}}/support" style="display: inline-block; margin: 0 10px; color: #667eea; text-decoration: none; font-size: 14px;">Contact Support</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #0f0f0f; padding: 30px; text-align: center; border-top: 1px solid #2a2a2a;">
+              <p style="margin: 0 0 10px; color: #888; font-size: 14px;">
+                © {{year}} {{appName}}. All rights reserved.
+              </p>
+              <p style="margin: 0; color: #666; font-size: 12px;">
+                <a href="{{baseUrl}}/account/preferences" style="color: #667eea; text-decoration: none;">Email Preferences</a> • 
+                <a href="{{baseUrl}}/privacy" style="color: #667eea; text-decoration: none;">Privacy Policy</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

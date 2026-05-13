@@ -1,0 +1,4618 @@
+openapi: 3.1.0
+info:
+  title: MTN Bulk Data Wholesale Service API
+  version: 0.1.0
+  description: Backend contract required by the frontend-only MTN Bulk Data Wholesale Service console.
+  x-api-requirements:
+    - Every response must use the standard success/error envelope documented in components.schemas.ApiEnvelope and components.schemas.ErrorEnvelope.
+    - Authenticated operations require the hardened HTTP-only JWT session cookie unless the operation explicitly sets security to an empty list.
+    - Paginated table endpoints must return page, limit, total, totalPages, hasNextPage, and hasPreviousPage in meta.
+    - Phone and MSISDN input must be normalized to E.164 Uganda numbers matching +256(77|78|79|76|39)XXXXXXX.
+    - List endpoints with search parameters must support backend search because the frontend uses asynchronous API search when local table search has no matches.
+    - Payment initiation must return a pending transaction and payment session that can be tracked globally until confirmation, expiry, or failure.
+    - Customer account activation must follow the solution-document flow: activation link, email OTP verification, password creation, activation notification, then immediate portal access.
+    - Bundle package validity is fixed at 30 days; configurable bundle fields are service code, name, volume up to 4 TB, price, status, and visibility.
+    - PCRF is abstracted behind Provisioning; public API routes must use provisioning resources while the backend adapter maps to configured upstream PCRF endpoints.
+servers:
+  - url: https://backend.example.com/api
+    description: Live backend base URL
+security:
+  - cookieAuth: []
+tags:
+  - name: Auth
+  - name: Users
+  - name: Provisioning
+  - name: Overview
+  - name: Customers
+  - name: Bundles
+  - name: Purchases
+  - name: Service Requests
+  - name: Secondary Numbers
+  - name: Reports
+  - name: Preferences
+  - name: Security
+  - name: Audit
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in user
+      description: Authenticates customers with phone, email, or TIN OTP; privileged users with username, email, or phone number plus password and MFA; or any enrolled user with WebAuthn/passkeys. The frontend uses promptPasswordlessSetup from the response to decide whether to show the post-login passkey setup prompt after successful login.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+            examples:
+              accountPassword:
+                summary: Privileged username, email, or phone password login
+                value:
+                  method: password
+                  username: jbalikuddembe
+                  password: "********"
+              otp:
+                summary: OTP verification login
+                value:
+                  method: otp
+                  identifier: "+256772991001"
+                  identifierKind: phone
+                  otp: "12345"
+              tinOtp:
+                summary: TIN OTP verification login
+                value:
+                  method: otp
+                  identifier: "1000172796"
+                  identifierKind: tin
+                  otp: "12345"
+              passkey:
+                summary: Passkey login
+                value:
+                  method: passkey
+                  credentialId: webauthn-credential-id
+      responses:
+        "200":
+          description: Signed in successfully
+          headers:
+            Set-Cookie:
+              description: Sets the HTTP-only JWT session cookie. Production cookies must use __Host-mtn_bds_session with HttpOnly, Secure, SameSite=Strict, Path=/, Max-Age=28800, and no Domain attribute.
+              schema:
+                type: string
+                example: __Host-mtn_bds_session=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Max-Age=28800; Path=/; HttpOnly; Secure; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+              examples:
+                passwordLoginSuccess:
+                  $ref: "#/components/examples/AuthLoginSuccessResponseExample"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /users/staff:
+    post:
+      tags: [Users]
+      summary: Create admin or support user
+      description: Allows an authenticated administrator to create another admin or support user by submitting phoneNumber, email, lanId, and role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffUserCreateRequest"
+            examples:
+              supportUser:
+                summary: Create support user
+                value:
+                  phoneNumber: "+256789172796"
+                  email: support.agent@example.com
+                  lanId: support.agent
+                  role: SUPPORT
+      responses:
+        "201":
+          description: Staff user created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/UserAccount"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/activation/otp:
+    post:
+      tags: [Auth]
+      summary: Issue customer account activation OTP
+      description: Starts the solution-document activation flow after the contact person opens the activation link. BDS sends an OTP to the contact person's email address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountActivationOtpRequest"
+      responses:
+        "200":
+          description: Activation OTP issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountActivationOtpResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/activation/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Verify customer account activation OTP
+      description: Validates the email OTP from the activation flow and returns a short-lived password setup token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountActivationOtpVerificationRequest"
+      responses:
+        "200":
+          description: Activation OTP verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountActivationOtpVerificationResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/activation/password:
+    post:
+      tags: [Auth]
+      summary: Create password and activate customer account
+      description: Creates the contact person's first password after OTP verification, activates the customer account, sends activation notifications, and starts a session for immediate portal access.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountActivationPasswordRequest"
+      responses:
+        "200":
+          description: Account activated
+          headers:
+            Set-Cookie:
+              description: Sets the HTTP-only JWT session cookie for immediate portal access.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /provisioning/group-member:
+    post:
+      tags: [Provisioning]
+      summary: Add Provisioning group member
+      description: Privileged Provisioning operation that adds a secondary MSISDN under a primary subscription. Admin and support roles only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisioningAddGroupMemberRequest"
+      responses:
+        "200":
+          description: Group member request accepted by Provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningAddGroupMemberResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+  /provisioning/group-members/bulk:
+    post:
+      tags: [Provisioning]
+      summary: Bulk add Provisioning group members
+      description: Privileged Provisioning operation that adds multiple secondary MSISDNs in one provider request. Admin and support roles only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkRequest"
+      responses:
+        "200":
+          description: Bulk group-member request accepted by Provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+  /provisioning/group-member/delete:
+    post:
+      tags: [Provisioning]
+      summary: Delete Provisioning group member
+      description: Privileged Provisioning operation that removes a secondary MSISDN from a grouped subscription. Admin and support roles only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberRequest"
+      responses:
+        "200":
+          description: Group member delete request accepted by Provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningDeleteGroupMemberResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+  /provisioning/subscriptions/update:
+    post:
+      tags: [Provisioning]
+      summary: Update Provisioning subscription
+      description: Privileged Provisioning operation used after successful payment to apply additional provisioning/top-up attempts. Admin and support roles only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionRequest"
+      responses:
+        "200":
+          description: Subscription update request accepted by Provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningUpdateSubscriptionResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+  /provisioning/subscriber:
+    post:
+      tags: [Provisioning]
+      summary: Add Provisioning subscriber
+      description: Privileged Provisioning operation that registers a primary subscriber. PCRF remains abstracted behind the backend adapter and is not exposed as a public API resource. Admin and support roles only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisioningAddSubscriberRequest"
+            example:
+              msisdn: "256779999707"
+              transactionId: "78954566743"
+      responses:
+        "200":
+          description: Subscriber request accepted by Provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisioningAddSubscriberResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+  /overview:
+    get:
+      tags: [Overview]
+      summary: Fetch dashboard overview
+      parameters:
+        - $ref: "#/components/parameters/RevenuePeriod"
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Overview fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewResponse"
+              examples:
+                overview:
+                  $ref: "#/components/examples/OverviewResponseExample"
+  /customers:
+    get:
+      tags: [Customers]
+      summary: List customer accounts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, deactivated, pending]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Customers fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerListResponse"
+              examples:
+                paginatedCustomers:
+                  $ref: "#/components/examples/CustomerListResponseExample"
+    post:
+      tags: [Customers]
+      summary: Register a customer
+      description: Validates the primary MSISDN APN, adds subscriber to Provisioning, and triggers account activation notifications.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerRegistrationRequest"
+            examples:
+              registerCustomer:
+                $ref: "#/components/examples/CustomerRegistrationRequestExample"
+      responses:
+        "200":
+          description: Customer registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerRegistrationResponse"
+              examples:
+                registeredCustomer:
+                  $ref: "#/components/examples/CustomerRegistrationResponseExample"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      tags: [Customers]
+      summary: Get customer account
+      responses:
+        "200":
+          description: Customer fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+              examples:
+                customer:
+                  $ref: "#/components/examples/CustomerResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Customers]
+      summary: Update customer account details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpdateRequest"
+            examples:
+              updateCustomer:
+                $ref: "#/components/examples/CustomerUpdateRequestExample"
+      responses:
+        "200":
+          description: Customer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+              examples:
+                updatedCustomer:
+                  $ref: "#/components/examples/CustomerResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/status:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    post:
+      tags: [Customers]
+      summary: Deactivate or reactivate customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerStatusChangeRequest"
+            examples:
+              deactivateCustomer:
+                $ref: "#/components/examples/CustomerStatusChangeRequestExample"
+      responses:
+        "200":
+          description: Customer status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+              examples:
+                statusUpdated:
+                  $ref: "#/components/examples/CustomerDeactivatedResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    post:
+      tags: [Customers]
+      summary: Add primary MSISDN
+      description: Runs APN validation through the configured VasApps/UDM provider before adding the primary MSISDN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrimaryMsisdnRequest"
+            examples:
+              addPrimaryMsisdn:
+                $ref: "#/components/examples/PrimaryMsisdnRequestExample"
+      responses:
+        "200":
+          description: Primary MSISDN added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrimaryMsisdnResponse"
+              examples:
+                primaryMsisdnAdded:
+                  $ref: "#/components/examples/PrimaryMsisdnResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns/{primaryMsisdn}/balance:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+      - $ref: "#/components/parameters/PrimaryMsisdn"
+    get:
+      tags: [Customers]
+      summary: Check bundle balance
+      description: Retrieves bundle volume and expiry from Provisioning.
+      responses:
+        "200":
+          description: Balance fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceResponse"
+              examples:
+                balance:
+                  $ref: "#/components/examples/BalanceResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns/{primaryMsisdn}/secondary-numbers:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+      - $ref: "#/components/parameters/PrimaryMsisdn"
+    get:
+      tags: [Secondary Numbers]
+      summary: List secondary numbers
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, removed]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Secondary numbers fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondaryNumberListResponse"
+              examples:
+                paginatedSecondaryNumbers:
+                  $ref: "#/components/examples/SecondaryNumberListResponseExample"
+    post:
+      tags: [Secondary Numbers]
+      summary: Add secondary number
+      description: Validates the secondary MSISDN through the configured VasApps/UDM APN provider before adding the number. The request is rejected when the provider returns multiple APNs or a single APN that does not match the registered customer APN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecondaryNumberRequest"
+            examples:
+              addSecondaryNumber:
+                $ref: "#/components/examples/SecondaryNumberRequestExample"
+      responses:
+        "200":
+          description: Secondary number added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondaryNumberMutationResponse"
+              examples:
+                secondaryNumberAdded:
+                  $ref: "#/components/examples/SecondaryNumberMutationResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns/{primaryMsisdn}/secondary-numbers/bulk:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+      - $ref: "#/components/parameters/PrimaryMsisdn"
+    post:
+      tags: [Secondary Numbers]
+      summary: Bulk upload secondary numbers
+      description: Validates each uploaded MSISDN through the configured VasApps/UDM APN provider and reports rejected numbers with the exact APN rule that failed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecondaryBulkRequest"
+            examples:
+              bulkUploadSecondaryNumbers:
+                $ref: "#/components/examples/SecondaryBulkRequestExample"
+      responses:
+        "200":
+          description: Bulk upload processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondaryBulkResponse"
+              examples:
+                bulkUploadProcessed:
+                  $ref: "#/components/examples/SecondaryBulkResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns/{primaryMsisdn}/secondary-numbers/{secondaryMsisdn}:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+      - $ref: "#/components/parameters/PrimaryMsisdn"
+      - name: secondaryMsisdn
+        in: path
+        required: true
+        description: URL-encode the leading plus sign when sending this path parameter, for example %2B256772991001.
+        schema:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+    delete:
+      tags: [Secondary Numbers]
+      summary: Remove secondary number
+      description: Sends deleteGroupMember to Provisioning and removes the local secondary-number flag.
+      responses:
+        "200":
+          description: Secondary number removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondaryNumberResponse"
+              examples:
+                secondaryNumberRemoved:
+                  $ref: "#/components/examples/SecondaryNumberRemovedResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /customers/{customerId}/primary-msisdns/{primaryMsisdn}/secondary-numbers/{secondaryMsisdn}/usage:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+      - $ref: "#/components/parameters/PrimaryMsisdn"
+      - name: secondaryMsisdn
+        in: path
+        required: true
+        description: URL-encode the leading plus sign when sending this path parameter, for example %2B256772991001.
+        schema:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+    get:
+      tags: [Secondary Numbers]
+      summary: Check secondary number usage
+      description: Returns usage and remaining allocation for a secondary MSISDN under a customer primary MSISDN.
+      responses:
+        "200":
+          description: Secondary MSISDN usage fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondaryUsageResponse"
+              examples:
+                secondaryUsage:
+                  $ref: "#/components/examples/SecondaryUsageResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /bundles:
+    get:
+      tags: [Bundles]
+      summary: List configured wholesale bundles
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, paused, disabled]
+        - name: visible
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: Bundles fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleListResponse"
+              examples:
+                bundles:
+                  $ref: "#/components/examples/BundleListResponseExample"
+    post:
+      tags: [Bundles]
+      summary: Create bundle package
+      description: Adds a wholesale bundle package to the catalog. Admins may create hidden or disabled packages before release.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BundlePackageRequest"
+            examples:
+              createPackage:
+                $ref: "#/components/examples/BundlePackageRequestExample"
+      responses:
+        "200":
+          description: Bundle package created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleResponse"
+              examples:
+                packageCreated:
+                  $ref: "#/components/examples/BundleResponseExample"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /bundles/{bundleId}:
+    parameters:
+      - $ref: "#/components/parameters/BundleId"
+    get:
+      tags: [Bundles]
+      summary: Get bundle package
+      responses:
+        "200":
+          description: Bundle package fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleResponse"
+              examples:
+                package:
+                  $ref: "#/components/examples/BundleResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Bundles]
+      summary: Update bundle package
+      description: Updates package details, customer visibility, and active/paused/disabled state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BundlePackageUpdateRequest"
+            examples:
+              updatePackage:
+                $ref: "#/components/examples/BundlePackageUpdateRequestExample"
+      responses:
+        "200":
+          description: Bundle package updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleResponse"
+              examples:
+                packageUpdated:
+                  $ref: "#/components/examples/BundleResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /purchases:
+    post:
+      tags: [Purchases]
+      summary: Initiate bundle payment
+      description: Creates a pending transaction and payment session. Mobile money payments use the configured MoMo provider; when SP transfer mode is enabled, the API posts FromFri, ToFri, Amount, Currency, ExternalTransactionId, and ReferenceId to ECW /sptransfer/ and waits for the asynchronous provider callback. Airtime payments use the update-balance-and-date integration at the configured 9040 base URL with originTimeStamp, originTransactionID, subscriberNumber, and a negative adjustmentAmountRelative, then wait for the asynchronous deduction callback. PRN payments call the configured Generate PRN provider endpoint with customerMsisdn, customerName, productCode, productName, amount, payingCurrency, transactionId, and additionalInfo, then return the provider paymentReference as the PRN while waiting for the paid callback; card payments initiate the configured card provider and return paymentUrl for frontend popup checkout. PCRF is called only after customer payment is confirmed, using the internal Provisioning subscribe-service adapter with msisdn, serviceCode, startDateTime, endDateTime, and transactionId. Subscribe timestamps use yyyy-MM-ddTHH:mm:ss. The frontend subscribes to the returned Socket.IO room/event for provider confirmation before provisioning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseRequest"
+            examples:
+              prnPurchase:
+                $ref: "#/components/examples/PurchaseRequestPrnExample"
+              mobileMoneyPurchase:
+                $ref: "#/components/examples/PurchaseRequestMobileMoneyExample"
+              cardPurchase:
+                $ref: "#/components/examples/PurchaseRequestCardExample"
+      responses:
+        "200":
+          description: Payment initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseResponse"
+              examples:
+                prnPaymentInitiated:
+                  $ref: "#/components/examples/PurchaseResponsePrnExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /purchases/{transactionId}/retry:
+    post:
+      tags: [Purchases]
+      summary: Retry failed payment
+      description: Creates a fresh payment session for a failed transaction and moves the transaction back to pending. Receipts must only be issued for provisioned transactions.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseRetryRequest"
+            examples:
+              retryPrnPayment:
+                $ref: "#/components/examples/PurchaseRetryRequestExample"
+      responses:
+        "200":
+          description: Payment retry initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseResponse"
+              examples:
+                retryInitiated:
+                  $ref: "#/components/examples/PurchaseRetryResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /purchases/{transactionId}/confirmation:
+    post:
+      tags: [Purchases]
+      summary: Confirm payment and provision bundle
+      description: Confirms a provider payment event, provisions the bundle, and returns the Provisioning request flags. In production this is normally driven by the payment provider/webhook after a Socket.IO payment status event.
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseConfirmationRequest"
+            examples:
+              confirmPayment:
+                $ref: "#/components/examples/PurchaseConfirmationRequestExample"
+      responses:
+        "200":
+          description: Payment confirmed and bundle provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseConfirmationResponse"
+              examples:
+                paymentConfirmed:
+                  $ref: "#/components/examples/PurchaseConfirmationResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /payments/callback:
+    post:
+      tags: [Payment Provider]
+      summary: Receive payment provider callback
+      description: Receives payment status callbacks from the external provider, including paid PRN, approved mobile money, and deducted airtime callbacks, provisions confirmed payments idempotently, and emits payment.status over Socket.IO.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentProviderCallbackRequest"
+            examples:
+              providerCallbackConfirmed:
+                $ref: "#/components/examples/PaymentProviderCallbackExample"
+      responses:
+        "200":
+          description: Callback processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseConfirmationResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /payments/provider-checkout/{sessionId}:
+    get:
+      tags: [Payment Provider]
+      summary: Mock external provider checkout page
+      description: Local development card checkout page. Real deployments should use the paymentUrl returned by the configured payment provider.
+      security: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Mock checkout HTML
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /service-requests:
+    get:
+      tags: [Service Requests]
+      summary: List service requests
+      description: Admin report table for public onboarding requests with search, status, date range, pagination, and conversion workflow.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [new, contacted, converted]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Service requests fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceRequestListResponse"
+              examples:
+                serviceRequests:
+                  $ref: "#/components/examples/ServiceRequestListResponseExample"
+    post:
+      tags: [Service Requests]
+      summary: Submit public service request
+      description: Captures a public lead from the MTN Bulk Data Wholesale public site for onboarding follow-up.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceRequestRequest"
+            examples:
+              publicServiceRequest:
+                $ref: "#/components/examples/ServiceRequestRequestExample"
+      responses:
+        "200":
+          description: Service request submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceRequestResponse"
+              examples:
+                serviceRequestSubmitted:
+                  $ref: "#/components/examples/ServiceRequestResponseExample"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /service-requests/{serviceRequestId}:
+    parameters:
+      - name: serviceRequestId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Service Requests]
+      summary: Get service request
+      responses:
+        "200":
+          description: Service request fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceRequestResponse"
+              examples:
+                serviceRequest:
+                  $ref: "#/components/examples/ServiceRequestResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Service Requests]
+      summary: Update service request status
+      description: Lets admins mark public service requests as new or contacted before conversion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceRequestUpdateRequest"
+            examples:
+              markContacted:
+                $ref: "#/components/examples/ServiceRequestUpdateRequestExample"
+      responses:
+        "200":
+          description: Service request updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceRequestResponse"
+              examples:
+                serviceRequestUpdated:
+                  $ref: "#/components/examples/ServiceRequestUpdatedResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /service-requests/{serviceRequestId}/convert:
+    parameters:
+      - name: serviceRequestId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Service Requests]
+      summary: Convert service request to customer
+      description: Converts a qualified public service request into a customer profile using the supplied customer registration details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerRegistrationRequest"
+            examples:
+              convertServiceRequest:
+                $ref: "#/components/examples/ServiceRequestConversionRequestExample"
+      responses:
+        "200":
+          description: Service request converted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceRequestConversionResponse"
+              examples:
+                serviceRequestConverted:
+                  $ref: "#/components/examples/ServiceRequestConversionResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /reports/admin:
+    get:
+      tags: [Reports]
+      summary: Fetch admin reporting data
+      description: Returns admin report datasets. Search, status, and date filters are used by frontend tables as an asynchronous fallback when local filtering finds no rows.
+      parameters:
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          required: false
+          description: Optional status filter applied to compatible report datasets.
+          schema:
+            type: string
+            enum: [active, pending, deactivated, provisioned, failed]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Admin report fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReportResponse"
+              examples:
+                adminReport:
+                  $ref: "#/components/examples/AdminReportResponseExample"
+  /reports/transactions:
+    get:
+      tags: [Reports]
+      summary: Fetch dedicated transaction report table
+      description: Supports the frontend report table with search, customer, status, payment, date range, pagination, and infinite-scroll loading.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: customerId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [provisioned, pending, failed]
+        - name: paymentMethod
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [mobile_money, airtime, prn, card]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Transaction report table fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTransactionListResponse"
+              examples:
+                paginatedTransactions:
+                  $ref: "#/components/examples/ReportTransactionListResponseExample"
+  /reports/customer:
+    get:
+      tags: [Reports]
+      summary: Fetch customer reporting data
+      description: Returns customer report datasets. Search, status, and date filters are used by frontend tables as an asynchronous fallback when local filtering finds no rows.
+      parameters:
+        - name: customerId
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          required: false
+          description: Optional status filter applied to compatible bundle purchase and secondary number datasets.
+          schema:
+            type: string
+            enum: [provisioned, pending, failed, active, removed]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Customer report fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerReportResponse"
+              examples:
+                customerReport:
+                  $ref: "#/components/examples/CustomerReportResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /preferences:
+    get:
+      tags: [Preferences]
+      summary: Fetch user preferences
+      responses:
+        "200":
+          description: Preferences fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferencesResponse"
+              examples:
+                preferences:
+                  $ref: "#/components/examples/UserPreferencesResponseExample"
+    put:
+      tags: [Preferences]
+      summary: Update user preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserPreferences"
+            examples:
+              updatePreferences:
+                $ref: "#/components/examples/UserPreferencesRequestExample"
+      responses:
+        "200":
+          description: Preferences updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPreferencesResponse"
+              examples:
+                preferencesUpdated:
+                  $ref: "#/components/examples/UserPreferencesResponseExample"
+  /security/mfa:
+    get:
+      tags: [Security]
+      summary: Fetch MFA service configuration
+      responses:
+        "200":
+          description: MFA configuration fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaConfigurationResponse"
+              examples:
+                mfaConfiguration:
+                  $ref: "#/components/examples/MfaConfigurationResponseExample"
+    put:
+      tags: [Security]
+      summary: Update MFA service configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaConfiguration"
+            examples:
+              updateMfaConfiguration:
+                $ref: "#/components/examples/MfaConfigurationRequestExample"
+      responses:
+        "200":
+          description: MFA configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaConfigurationResponse"
+              examples:
+                mfaConfigurationUpdated:
+                  $ref: "#/components/examples/MfaConfigurationResponseExample"
+  /security/totp/enrollment:
+    post:
+      tags: [Security]
+      summary: Start authenticator app enrollment
+      description: Creates a short-lived named TOTP enrollment challenge with QR, manual setup details, and recovery codes.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpEnrollmentRequest"
+            examples:
+              startEnrollment:
+                $ref: "#/components/examples/TotpEnrollmentRequestExample"
+      responses:
+        "200":
+          description: Enrollment started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrollmentResponse"
+              examples:
+                enrollmentStarted:
+                  $ref: "#/components/examples/TotpEnrollmentResponseExample"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /security/totp/enrollment/verify:
+    post:
+      tags: [Security]
+      summary: Verify authenticator app enrollment
+      description: Confirms the six-digit TOTP code for a specific enrollment and adds the authenticator app to the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpVerificationRequest"
+            examples:
+              verifyEnrollment:
+                $ref: "#/components/examples/TotpVerificationRequestExample"
+      responses:
+        "200":
+          description: Enrollment verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpVerificationResponse"
+              examples:
+                enrollmentVerified:
+                  $ref: "#/components/examples/TotpVerificationResponseExample"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+  /security/totp/apps:
+    get:
+      tags: [Security]
+      summary: List enrolled authenticator apps
+      description: Returns all TOTP authenticator apps enrolled for the current account.
+      responses:
+        "200":
+          description: Authenticator apps fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpAuthenticatorAppListResponse"
+              examples:
+                authenticatorApps:
+                  $ref: "#/components/examples/TotpAuthenticatorAppListResponseExample"
+  /security/sessions:
+    get:
+      tags: [Security]
+      summary: List authenticated user sessions
+      responses:
+        "200":
+          description: Sessions fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionListResponse"
+              examples:
+                sessions:
+                  $ref: "#/components/examples/AuthSessionListResponseExample"
+  /security/sessions/{sessionId}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    delete:
+      tags: [Security]
+      summary: Revoke authenticated user session
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+              examples:
+                sessionRevoked:
+                  $ref: "#/components/examples/AuthSessionResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+  /security/webauthn/options:
+    post:
+      tags: [Security]
+      summary: Generate WebAuthn registration options
+      responses:
+        "200":
+          description: Options generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnOptionsResponse"
+              examples:
+                webauthnOptions:
+                  $ref: "#/components/examples/WebAuthnOptionsResponseExample"
+  /security/webauthn/devices:
+    get:
+      tags: [Security]
+      summary: List WebAuthn devices
+      responses:
+        "200":
+          description: Devices fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnDeviceListResponse"
+              examples:
+                webauthnDevices:
+                  $ref: "#/components/examples/WebAuthnDeviceListResponseExample"
+    post:
+      tags: [Security]
+      summary: Register WebAuthn device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnDeviceRegistrationRequest"
+            examples:
+              registerDevice:
+                $ref: "#/components/examples/WebAuthnDeviceRegistrationRequestExample"
+      responses:
+        "200":
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnDeviceResponse"
+              examples:
+                deviceRegistered:
+                  $ref: "#/components/examples/WebAuthnDeviceResponseExample"
+  /security/webauthn/devices/{deviceId}:
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      tags: [Security]
+      summary: Revoke WebAuthn device
+      responses:
+        "200":
+          description: Device revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnDeviceResponse"
+              examples:
+                deviceRevoked:
+                  $ref: "#/components/examples/WebAuthnDeviceRevokedResponseExample"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /audit:
+    get:
+      tags: [Audit]
+      summary: Fetch audit events
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [security, customer, bundle, integration]
+        - name: status
+          in: query
+          required: false
+          description: Audit outcome filter.
+          schema:
+            type: string
+            enum: [success, warning, failed]
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+      responses:
+        "200":
+          description: Audit events fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventListResponse"
+              examples:
+                auditEvents:
+                  $ref: "#/components/examples/AuditEventListResponseExample"
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-mtn_bds_session
+      description: HTTP-only, Secure, SameSite=Strict signed JWT session cookie. Local development may use mtn_bds_session over http.
+  parameters:
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      schema:
+        type: string
+    BundleId:
+      name: bundleId
+      in: path
+      required: true
+      schema:
+        type: string
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+    PrimaryMsisdn:
+      name: primaryMsisdn
+      in: path
+      required: true
+      description: URL-encode the leading plus sign when sending this path parameter, for example %2B256772990001.
+      schema:
+        $ref: "#/components/schemas/UgandaPhoneNumber"
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: One-based page number used by paginated tables.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      description: Number of rows per page. Infinite scrolling uses this as the fetch batch size.
+    Search:
+      name: search
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Case-insensitive search term applied to human-readable table fields.
+    RevenuePeriod:
+      name: revenuePeriod
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [weekly, daily, quarterly, six_months, yearly, custom]
+        default: weekly
+      description: Revenue trend aggregation period. Weekly returns 4 weekly totals, daily returns current-month daily points, quarterly returns 3 monthly points, six_months returns 6 monthly points, yearly returns 12 monthly points, and custom uses dateFrom/dateTo as daily points.
+    DateFrom:
+      name: dateFrom
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: Inclusive start date for date-filtered table rows. For /overview, used when revenuePeriod is custom.
+    DateTo:
+      name: dateTo
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: Inclusive end date for date-filtered table rows. For /overview, used when revenuePeriod is custom.
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            validationError:
+              $ref: "#/components/examples/ErrorResponseExample"
+  examples:
+    AuthLoginSuccessResponseExample:
+      summary: Password login success
+      value:
+        success: true
+        message: Signed in successfully
+        data:
+          user:
+            id: user-customer-001
+            name: Sarah Namuli
+            email: operations@wavenet.ug
+            role: customer
+            customerId: cus-wavenet
+          session:
+            id: sess-20260422-001
+            expiresAt: "2026-04-22T18:00:00+03:00"
+          nextRoute: /console/customer
+          promptPasswordlessSetup: true
+          passwordlessSetupPrompt:
+            title: Set up passwordless login
+            message: Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock.
+            setupUrl: /console?section=security
+    CustomerListResponseExample:
+      summary: Paginated customer account table
+      value:
+        success: true
+        message: Records fetched successfully
+        data:
+          - id: cus-wavenet
+            businessName: WaveNet
+            registrationNumber: UG-BR-48290
+            businessEmail: business@wavenet.ug
+            businessPhone: "+256772100200"
+            contactPerson: Sarah Namuli
+            email: operations@wavenet.ug
+            phone: "+256772100201"
+            apnName: wavenet.mtn.ug
+            apnId: APN-1092
+            primaryMsisdns: ["+256772990001", "+256772990002"]
+            secondaryCount: 430
+            bundlePurchases: 350
+            totalSpendUgx: 18500000
+            status: active
+            createdAt: "2026-04-18T09:00:00+03:00"
+        meta:
+          page: 1
+          limit: 10
+          total: 1
+          totalPages: 1
+          hasNextPage: false
+          hasPreviousPage: false
+    CustomerRegistrationRequestExample:
+      summary: Register customer account
+      value:
+        businessName: WaveNet Uganda
+        registrationNumber: UG-BR-1029
+        businessEmail: accounts@wavenet.ug
+        businessPhone: "+256772991000"
+        contactPerson: Sarah Namuli
+        contactEmail: sarah.namuli@wavenet.ug
+        contactPhone: "+256772991001"
+        apnName: wavenet.mtn.ug
+        apnId: APN-1092
+        primaryMsisdn: "+256772990001"
+    CustomerRegistrationResponseExample:
+      summary: Customer registered
+      value:
+        success: true
+        message: Customer registered successfully
+        data:
+          customer:
+            id: cus-wavenet
+            businessName: WaveNet Uganda
+            registrationNumber: UG-BR-1029
+            businessEmail: accounts@wavenet.ug
+            businessPhone: "+256772991000"
+            contactPerson: Sarah Namuli
+            email: sarah.namuli@wavenet.ug
+            phone: "+256772991001"
+            apnName: wavenet.mtn.ug
+            apnId: APN-1092
+            primaryMsisdns: ["+256772990001"]
+            secondaryCount: 0
+            bundlePurchases: 0
+            totalSpendUgx: 0
+            status: pending
+            createdAt: "2026-04-22T09:00:00+03:00"
+          validation:
+            msisdn: "+256772990001"
+            accepted: true
+            reason: MSISDN is valid for this APN.
+            apnIds: [APN-1092]
+            registeredApnId: APN-1092
+            provisioningAction: addSubscriber
+          activation:
+            activationToken: act_demo
+            activationUrl: /auth/activate?token=act_demo
+            expiresAt: "2026-04-23T09:00:00+03:00"
+            deliveryChannels: [business_email, contact_email]
+    CustomerResponseExample:
+      summary: Customer details
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          id: cus-wavenet
+          businessName: WaveNet
+          registrationNumber: UG-BR-48290
+          businessEmail: business@wavenet.ug
+          businessPhone: "+256772100200"
+          contactPerson: Sarah Namuli
+          email: operations@wavenet.ug
+          phone: "+256772100201"
+          apnName: wavenet.mtn.ug
+          apnId: APN-1092
+          primaryMsisdns: ["+256772990001", "+256772990002"]
+          secondaryCount: 430
+          bundlePurchases: 350
+          totalSpendUgx: 18500000
+          status: active
+          createdAt: "2026-04-18T09:00:00+03:00"
+    CustomerUpdateRequestExample:
+      summary: Update customer contact details
+      value:
+        businessEmail: billing@wavenet.ug
+        businessPhone: "+256772991009"
+        contactPerson: Sarah Namuli
+        contactEmail: sarah.namuli@wavenet.ug
+        contactPhone: "+256772991001"
+    CustomerStatusChangeRequestExample:
+      summary: Deactivate customer account
+      value:
+        status: deactivated
+        reason: Customer requested suspension.
+        supportingNote: Approved by account manager.
+    CustomerDeactivatedResponseExample:
+      summary: Customer deactivated
+      value:
+        success: true
+        message: Customer status updated successfully
+        data:
+          id: cus-wavenet
+          businessName: WaveNet
+          registrationNumber: UG-BR-48290
+          businessEmail: business@wavenet.ug
+          businessPhone: "+256772100200"
+          contactPerson: Sarah Namuli
+          email: operations@wavenet.ug
+          phone: "+256772100201"
+          apnName: wavenet.mtn.ug
+          apnId: APN-1092
+          primaryMsisdns: ["+256772990001", "+256772990002"]
+          secondaryCount: 430
+          bundlePurchases: 350
+          totalSpendUgx: 18500000
+          status: deactivated
+          deactivationReason: Customer requested suspension.
+          createdAt: "2026-04-18T09:00:00+03:00"
+    PrimaryMsisdnRequestExample:
+      summary: Add primary number
+      value:
+        primaryMsisdn: "+256772990003"
+    PrimaryMsisdnResponseExample:
+      summary: Primary number added
+      value:
+        success: true
+        message: Primary MSISDN added successfully
+        data:
+          customer:
+            id: cus-wavenet
+            businessName: WaveNet
+            registrationNumber: UG-BR-48290
+            businessEmail: business@wavenet.ug
+            businessPhone: "+256772100200"
+            contactPerson: Sarah Namuli
+            email: operations@wavenet.ug
+            phone: "+256772100201"
+            apnName: wavenet.mtn.ug
+            apnId: APN-1092
+            primaryMsisdns: ["+256772990001", "+256772990002", "+256772990003"]
+            secondaryCount: 430
+            bundlePurchases: 350
+            totalSpendUgx: 18500000
+            status: active
+            createdAt: "2026-04-18T09:00:00+03:00"
+          validation:
+            msisdn: "+256772990003"
+            accepted: true
+            reason: MSISDN is valid for this APN.
+            apnIds: [APN-1092]
+            registeredApnId: APN-1092
+            provisioningAction: addSubscriber
+    BalanceResponseExample:
+      summary: Primary bundle balance
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          primaryMsisdn: "+256772990001"
+          bundleName: Wholesale 2 TB
+          totalVolumeGb: 2048
+          remainingVolumeGb: 1334.5
+          expiryAt: "2026-05-21T23:59:59+03:00"
+          autoTopupRemaining: 2
+    SecondaryNumberListResponseExample:
+      summary: Paginated secondary numbers
+      value:
+        success: true
+        message: Records fetched successfully
+        data:
+          - id: sec-1
+            customerId: cus-wavenet
+            primaryMsisdn: "+256772990001"
+            msisdn: "+256772991001"
+            apnId: APN-1092
+            status: active
+            addedAt: "2026-04-20T09:00:00+03:00"
+        meta:
+          page: 1
+          limit: 10
+          total: 1
+          totalPages: 1
+          hasNextPage: false
+          hasPreviousPage: false
+    SecondaryNumberRequestExample:
+      summary: Add secondary number
+      value:
+        msisdn: "+256772991010"
+    SecondaryNumberMutationResponseExample:
+      summary: Secondary number added
+      value:
+        success: true
+        message: Secondary MSISDN added successfully
+        data:
+          secondaryNumber:
+            id: sec-101
+            customerId: cus-wavenet
+            primaryMsisdn: "+256772990001"
+            msisdn: "+256772991010"
+            apnId: APN-1092
+            status: active
+            addedAt: "2026-04-22T09:15:00+03:00"
+          validation:
+            msisdn: "+256772991010"
+            accepted: true
+            reason: MSISDN is valid for this APN.
+            apnIds: [APN-1092]
+            registeredApnId: APN-1092
+            provisioningAction: addGroupMember
+    SecondaryBulkRequestExample:
+      summary: Bulk upload secondary numbers
+      value:
+        msisdns:
+          - "+256772991011"
+          - "+256772991012"
+    SecondaryBulkResponseExample:
+      summary: Bulk secondary upload result
+      value:
+        success: true
+        message: Bulk secondary MSISDN upload processed
+        data:
+          added:
+            - id: sec-102
+              customerId: cus-wavenet
+              primaryMsisdn: "+256772990001"
+              msisdn: "+256772991011"
+              apnId: APN-1092
+              status: active
+              addedAt: "2026-04-22T09:16:00+03:00"
+          rejected:
+            - msisdn: "+256772991012"
+              accepted: false
+              reason: MSISDN is already linked to this primary.
+              apnIds: [APN-1092]
+              registeredApnId: APN-1092
+              provisioningAction: addMultipleGroupMember
+    SecondaryNumberRemovedResponseExample:
+      summary: Secondary number removed
+      value:
+        success: true
+        message: Secondary MSISDN removed successfully
+        data:
+          id: sec-101
+          customerId: cus-wavenet
+          primaryMsisdn: "+256772990001"
+          msisdn: "+256772991010"
+          apnId: APN-1092
+          status: removed
+          addedAt: "2026-04-22T09:15:00+03:00"
+    SecondaryUsageResponseExample:
+      summary: Secondary number usage
+      value:
+        success: true
+        message: Secondary MSISDN usage fetched successfully
+        data:
+          customerId: cus-wavenet
+          primaryMsisdn: "+256772990001"
+          secondaryMsisdn: "+256772991010"
+          bundleName: Wholesale 2 TB
+          allocatedVolumeGb: 20
+          usedVolumeGb: 8.4
+          remainingVolumeGb: 11.6
+          usagePercent: 42
+          lastUsedAt: "2026-04-22T08:30:00+03:00"
+          status: active
+    BundleListResponseExample:
+      summary: Package catalog
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          - id: bundle-1tb
+            serviceCode: BDS-1T-30D
+            name: Wholesale 1 TB
+            volumeTb: 1
+            priceUgx: 2300000
+            validityDays: 30
+            status: active
+            visible: true
+            createdAt: "2026-04-15T09:00:00+03:00"
+            updatedAt: "2026-04-21T09:00:00+03:00"
+    BundlePackageRequestExample:
+      summary: Create package
+      value:
+        serviceCode: BDS-3T-30D
+        name: Wholesale 3 TB
+        volumeTb: 3
+        priceUgx: 6200000
+        validityDays: 30
+        status: active
+        visible: true
+    BundlePackageUpdateRequestExample:
+      summary: Update package visibility
+      value:
+        visible: false
+        status: paused
+    BundleResponseExample:
+      summary: Package details
+      value:
+        success: true
+        message: Bundle package created successfully
+        data:
+          id: bundle-1tb
+          serviceCode: BDS-1T-30D
+          name: Wholesale 1 TB
+          volumeTb: 1
+          priceUgx: 2300000
+          validityDays: 30
+          status: active
+          visible: true
+          createdAt: "2026-04-15T09:00:00+03:00"
+          updatedAt: "2026-04-21T09:00:00+03:00"
+    PurchaseRequestPrnExample:
+      summary: Start PRN payment
+      value:
+        customerId: cus-wavenet
+        primaryMsisdn: "+256772990001"
+        bundleId: bundle-1tb
+        provisioningCount: 2
+        paymentMethod: prn
+        prnProvider: bank
+        additionalInfo: Customer requested weekend bundle
+    PurchaseRequestMobileMoneyExample:
+      summary: Start mobile money payment
+      value:
+        customerId: cus-wavenet
+        primaryMsisdn: "+256772990001"
+        bundleId: bundle-1tb
+        provisioningCount: 1
+        paymentMethod: mobile_money
+        payingMsisdn: "+256772990001"
+    PurchaseRequestCardExample:
+      summary: Start card payment
+      value:
+        customerId: cus-wavenet
+        primaryMsisdn: "+256772990001"
+        bundleId: bundle-1tb
+        provisioningCount: 1
+        paymentMethod: card
+        autoRenew: true
+        redirectUrl: https://portal.example.com/payment-status
+    PurchaseResponsePrnExample:
+      summary: PRN payment initiated
+      description: The PRN value is returned by the configured external PRN provider.
+      value:
+        success: true
+        message: Payment initiated successfully
+        data:
+          transaction:
+            id: txn-1009
+            customerName: WaveNet
+            primaryMsisdn: "+256772990001"
+            bundleName: Wholesale 1 TB
+            paymentMethod: prn
+            amountUgx: 4600000
+            status: pending
+            createdAt: "2026-04-22T09:08:00+03:00"
+          paymentSession:
+            id: pay-20260422-001
+            transactionId: txn-1009
+            paymentMethod: prn
+            status: awaiting_payment
+            amountUgx: 4600000
+            currency: UGX
+            prn: A2086517260219
+            provider: bank
+            providerTransactionId: 6bc9766c-4f33-4493-a22c-1cc52c7ac365
+            providerReference: A2086517260219
+            providerGeneratedAt: "2026-02-19T11:30:00.000Z"
+            socketEvent: payment.status
+            socketRoom: payments:pay-20260422-001
+            expiresAt: "2026-02-26T11:27:06.000Z"
+            createdAt: "2026-04-22T09:08:00+03:00"
+            customerId: cus-wavenet
+            bundleId: bundle-1tb
+            provisioningCount: 2
+    PurchaseRetryRequestExample:
+      summary: Retry failed transaction
+      value:
+        prnProvider: bank
+    PurchaseRetryResponseExample:
+      summary: Retry payment initiated
+      value:
+        success: true
+        message: Payment retry initiated successfully
+        data:
+          transaction:
+            id: txn-1012
+            customerName: WaveNet
+            primaryMsisdn: "+256772990001"
+            bundleName: Wholesale 1 TB
+            paymentMethod: prn
+            amountUgx: 2300000
+            status: pending
+            createdAt: "2026-04-22T08:40:00+03:00"
+          paymentSession:
+            id: pay-20260422-002
+            transactionId: txn-1012
+            paymentMethod: prn
+            status: awaiting_payment
+            amountUgx: 2300000
+            currency: UGX
+            prn: PRN-20260422-0002
+            provider: bank
+            socketEvent: payment.status
+            socketRoom: payments:pay-20260422-002
+            expiresAt: "2026-04-22T10:05:00+03:00"
+            createdAt: "2026-04-22T09:50:00+03:00"
+            customerId: cus-wavenet
+            bundleId: bundle-1tb
+            provisioningCount: 1
+    PurchaseConfirmationRequestExample:
+      summary: Confirm payment session
+      value:
+        sessionId: pay-20260422-001
+        status: confirmed
+    PaymentProviderCallbackExample:
+      summary: PRN provider confirms payment
+      value:
+        internalTransactionId: 6bc9766c-4f33-4493-a22c-1cc52c7ac365
+        clientTransactionId: txn-1009
+        paymentReference: A2086517260219
+        status: paid
+        receiptNumber: A2086517260219
+    PurchaseConfirmationResponseExample:
+      summary: Payment confirmed
+      value:
+        success: true
+        message: Payment confirmed and bundle provisioned successfully
+        data:
+          transaction:
+            id: txn-1009
+            customerName: WaveNet
+            primaryMsisdn: "+256772990001"
+            bundleName: Wholesale 1 TB
+            paymentMethod: prn
+            amountUgx: 4600000
+            status: provisioned
+            createdAt: "2026-04-22T09:08:00+03:00"
+          paymentSession:
+            id: pay-20260422-001
+            transactionId: txn-1009
+            paymentMethod: prn
+            status: confirmed
+            amountUgx: 4600000
+            currency: UGX
+            prn: PRN-20260422-0001
+            provider: bank
+            socketEvent: payment.status
+            socketRoom: payments:pay-20260422-001
+            expiresAt: "2026-04-22T09:23:00+03:00"
+            createdAt: "2026-04-22T09:08:00+03:00"
+            customerId: cus-wavenet
+            bundleId: bundle-1tb
+            provisioningCount: 2
+          provisioningRequest:
+            subscribeService: true
+            modifySubSubscription: true
+            srvTopupCount: 1
+    ServiceRequestRequestExample:
+      summary: Public lead request
+      value:
+        businessName: WaveNet Uganda
+        contactPerson: Sarah Namuli
+        contactEmail: operations@wavenet.ug
+        contactPhone: "+256772991001"
+        preferredPackageId: bundle-1tb
+        message: We need bulk data for managed branch devices.
+    ServiceRequestResponseExample:
+      summary: Public service request submitted
+      value:
+        success: true
+        message: Service request submitted successfully
+        data:
+          id: req-20260422-001
+          businessName: WaveNet Uganda
+          contactPerson: Sarah Namuli
+          contactEmail: operations@wavenet.ug
+          contactPhone: "+256772991001"
+          preferredPackageId: bundle-1tb
+          preferredPackageName: Wholesale 1 TB
+          message: We need bulk data for managed branch devices.
+          status: new
+          createdAt: "2026-04-22T09:20:00+03:00"
+    ServiceRequestListResponseExample:
+      summary: Service request report table
+      value:
+        success: true
+        message: Records fetched successfully
+        data:
+          - id: srv-1001
+            businessName: Kampala Fiber Hub
+            contactPerson: Grace Nansubuga
+            contactEmail: operations@kampalafiber.ug
+            contactPhone: "+256772441120"
+            preferredPackageId: bundle-1tb
+            preferredPackageName: Wholesale 1 TB
+            message: We need data pooling for branch routers and field teams.
+            status: new
+            createdAt: "2026-04-21T10:30:00+03:00"
+        meta:
+          page: 1
+          limit: 10
+          total: 1
+          totalPages: 1
+          hasNextPage: false
+          hasPreviousPage: false
+    ServiceRequestUpdateRequestExample:
+      summary: Mark request contacted
+      value:
+        status: contacted
+        note: Spoke with the contact and confirmed onboarding documents are ready.
+    ServiceRequestUpdatedResponseExample:
+      summary: Service request contacted
+      value:
+        success: true
+        message: Service request updated successfully
+        data:
+          id: srv-1001
+          businessName: Kampala Fiber Hub
+          contactPerson: Grace Nansubuga
+          contactEmail: operations@kampalafiber.ug
+          contactPhone: "+256772441120"
+          preferredPackageId: bundle-1tb
+          preferredPackageName: Wholesale 1 TB
+          message: We need data pooling for branch routers and field teams.
+          status: contacted
+          createdAt: "2026-04-21T10:30:00+03:00"
+    ServiceRequestConversionRequestExample:
+      summary: Convert request into customer profile
+      value:
+        businessName: Kampala Fiber Hub
+        registrationNumber: UG-BR-90321
+        businessEmail: operations@kampalafiber.ug
+        businessPhone: "+256772441120"
+        contactPerson: Grace Nansubuga
+        contactEmail: operations@kampalafiber.ug
+        contactPhone: "+256772441120"
+        apnName: kampalafiber.mtn.ug
+        apnId: APN-2201
+        primaryMsisdn: "+256772441130"
+    ServiceRequestConversionResponseExample:
+      summary: Service request converted to customer
+      value:
+        success: true
+        message: Service request converted to customer successfully
+        data:
+          serviceRequest:
+            id: srv-1001
+            businessName: Kampala Fiber Hub
+            contactPerson: Grace Nansubuga
+            contactEmail: operations@kampalafiber.ug
+            contactPhone: "+256772441120"
+            preferredPackageId: bundle-1tb
+            preferredPackageName: Wholesale 1 TB
+            message: We need data pooling for branch routers and field teams.
+            status: converted
+            createdAt: "2026-04-21T10:30:00+03:00"
+          customer:
+            id: cus-kfh
+            businessName: Kampala Fiber Hub
+            registrationNumber: UG-BR-90321
+            businessEmail: operations@kampalafiber.ug
+            businessPhone: "+256772441120"
+            contactPerson: Grace Nansubuga
+            email: operations@kampalafiber.ug
+            phone: "+256772441120"
+            apnName: kampalafiber.mtn.ug
+            apnId: APN-2201
+            primaryMsisdns: ["+256772441130"]
+            secondaryCount: 0
+            bundlePurchases: 0
+            totalSpendUgx: 0
+            status: pending
+            createdAt: "2026-04-22T10:00:00+03:00"
+          validation:
+            msisdn: "+256772441130"
+            accepted: true
+            reason: MSISDN APN validation passed
+            apnIds: [APN-2201]
+            registeredApnId: APN-2201
+            provisioningAction: addSubscriber
+    OverviewResponseExample:
+      summary: Dashboard overview
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          metrics:
+            - label: Active customers
+              value: "42"
+              trend: "+8% this month"
+              tone: yellow
+          integrations:
+            - name: Network Provisioning
+              status: operational
+              latencyMs: 118
+              lastCheckedAt: "2026-04-22T09:00:00+03:00"
+          analytics:
+            revenueTrend:
+              - label: Week 1
+                date: "2026-04-01"
+                revenueUgx: 17200000
+                purchases: 12
+            customerSpend:
+              - customerName: WaveNet
+                spendUgx: 18500000
+                purchases: 350
+                secondaryNumbers: 430
+            paymentMix:
+              - paymentMethod: mobile_money
+                revenueUgx: 9200000
+                transactions: 8
+            statusBreakdown:
+              - status: provisioned
+                revenueUgx: 21400000
+                transactions: 17
+            integrationLatency:
+              - name: Payments Gateway
+                latencyMs: 156
+                status: operational
+          topCustomers: []
+          recentTransactions: []
+    AdminReportResponseExample:
+      summary: Admin report datasets
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          transactions:
+            - id: txn-1005
+              customerName: WaveNet
+              primaryMsisdn: "+256772990001"
+              bundleName: Wholesale 2 TB
+              paymentMethod: mobile_money
+              amountUgx: 4300000
+              status: provisioned
+              createdAt: "2026-04-21T08:42:00+03:00"
+          customerActivity:
+            - customerId: cus-wavenet
+              customerName: WaveNet
+              createdAt: "2026-04-18T09:00:00+03:00"
+              totalPrimaryNumbers: 2
+              totalSecondaryNumbers: 430
+              bundlesPurchased: 350
+              totalSpendUgx: 18500000
+              status: active
+    ReportTransactionListResponseExample:
+      summary: Paginated transaction report
+      value:
+        success: true
+        message: Records fetched successfully
+        data:
+          - id: txn-1005
+            customerId: cus-wavenet
+            customerName: WaveNet
+            registrationNumber: UG-BR-48290
+            apnId: APN-1092
+            primaryMsisdn: "+256772990001"
+            bundleName: Wholesale 2 TB
+            paymentMethod: mobile_money
+            amountUgx: 4300000
+            status: provisioned
+            createdAt: "2026-04-21T08:42:00+03:00"
+        meta:
+          page: 1
+          limit: 10
+          total: 1
+          totalPages: 1
+          hasNextPage: false
+          hasPreviousPage: false
+    CustomerReportResponseExample:
+      summary: Customer-scoped report datasets
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          customerId: cus-wavenet
+          bundlePurchaseHistory:
+            - id: txn-1005
+              customerName: WaveNet
+              primaryMsisdn: "+256772990001"
+              bundleName: Wholesale 2 TB
+              paymentMethod: mobile_money
+              amountUgx: 4300000
+              status: provisioned
+              createdAt: "2026-04-21T08:42:00+03:00"
+          secondaryNumbers:
+            - id: sec-1
+              customerId: cus-wavenet
+              primaryMsisdn: "+256772990001"
+              msisdn: "+256772991001"
+              apnId: APN-1092
+              status: active
+              addedAt: "2026-04-20T09:00:00+03:00"
+          balances:
+            - primaryMsisdn: "+256772990001"
+              bundleName: Wholesale 2 TB
+              totalVolumeGb: 2048
+              remainingVolumeGb: 1334.5
+              expiryAt: "2026-05-21T23:59:59+03:00"
+              autoTopupRemaining: 2
+    UserPreferencesRequestExample:
+      summary: Update user preferences
+      value:
+        theme: system
+        language: en
+        timezone: Africa/Kampala
+        defaultLanding: customer
+        dataDensity: comfortable
+        quietHours:
+          enabled: true
+          start: "20:00"
+          end: "07:00"
+        notifications:
+          email: true
+          sms: true
+          whatsapp: false
+          inApp: true
+    UserPreferencesResponseExample:
+      summary: User preferences
+      value:
+        success: true
+        message: Preferences updated successfully
+        data:
+          theme: system
+          language: en
+          timezone: Africa/Kampala
+          defaultLanding: customer
+          dataDensity: comfortable
+          quietHours:
+            enabled: true
+            start: "20:00"
+            end: "07:00"
+          notifications:
+            email: true
+            sms: true
+            whatsapp: false
+            inApp: true
+    MfaConfigurationRequestExample:
+      summary: Update MFA policy
+      value:
+        services:
+          - id: totp
+            label: Authenticator app
+            enabled: true
+            requiredForAdmins: true
+            requiredForCustomers: false
+            lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+          - id: webauthn
+            label: Passkeys
+            enabled: true
+            requiredForAdmins: true
+            requiredForCustomers: true
+            lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+          - id: recovery_codes
+            label: Recovery codes
+            enabled: true
+            requiredForAdmins: false
+            requiredForCustomers: true
+            lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+        trustedDeviceDays: 30
+        stepUpForBundlePurchases: true
+        stepUpForSecondaryNumberChanges: true
+    MfaConfigurationResponseExample:
+      summary: MFA policy
+      value:
+        success: true
+        message: MFA configuration updated successfully
+        data:
+          services:
+            - id: totp
+              label: Authenticator app
+              enabled: true
+              requiredForAdmins: true
+              requiredForCustomers: false
+              lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+            - id: email_otp
+              label: Email OTP
+              enabled: true
+              requiredForAdmins: false
+              requiredForCustomers: false
+              lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+            - id: sms_otp
+              label: SMS OTP
+              enabled: true
+              requiredForAdmins: false
+              requiredForCustomers: false
+              lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+            - id: webauthn
+              label: Passkeys
+              enabled: true
+              requiredForAdmins: true
+              requiredForCustomers: true
+              lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+            - id: recovery_codes
+              label: Recovery codes
+              enabled: true
+              requiredForAdmins: false
+              requiredForCustomers: true
+              lastUpdatedAt: "2026-04-22T09:00:00+03:00"
+          trustedDeviceDays: 30
+          stepUpForBundlePurchases: true
+          stepUpForSecondaryNumberChanges: true
+    TotpEnrollmentRequestExample:
+      summary: Start authenticator enrollment
+      value:
+        label: Microsoft Authenticator
+    TotpEnrollmentResponseExample:
+      summary: Authenticator enrollment challenge
+      value:
+        success: true
+        message: Authenticator enrollment started successfully
+        data:
+          id: totp-enroll-001
+          label: Microsoft Authenticator
+          secret: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+          otpauthUrl: otpauth://totp/MTN%20Bulk%20Data%20Wholesale:operations%40wavenet.ug?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=MTN%20Bulk%20Data%20Wholesale
+          issuer: MTN Bulk Data Wholesale
+          accountName: operations@wavenet.ug
+          qrCodeDataUrl: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA
+          recoveryCodes:
+            - MTN-8K2D-1P9Q
+            - MTN-4F7H-6R2X
+          expiresAt: "2026-04-22T09:30:00+03:00"
+    TotpVerificationRequestExample:
+      summary: Verify authenticator enrollment
+      value:
+        enrollmentId: totp-enroll-001
+        code: "123456"
+    TotpVerificationResponseExample:
+      summary: Authenticator app enrolled
+      value:
+        success: true
+        message: Authenticator app enrolled successfully
+        data:
+          enabled: true
+          app:
+            id: totp-app-001
+            label: Microsoft Authenticator
+            issuer: MTN Bulk Data Wholesale
+            accountName: operations@wavenet.ug
+            createdAt: "2026-04-22T09:21:00+03:00"
+            lastUsedAt: "2026-04-22T09:21:00+03:00"
+            status: active
+          recoveryCodes:
+            - MTN-8K2D-1P9Q
+            - MTN-4F7H-6R2X
+          verifiedAt: "2026-04-22T09:21:00+03:00"
+    TotpAuthenticatorAppListResponseExample:
+      summary: Enrolled authenticator apps
+      value:
+        success: true
+        message: Authenticator apps fetched successfully
+        data:
+          - id: totp-app-001
+            label: Microsoft Authenticator
+            issuer: MTN Bulk Data Wholesale
+            accountName: operations@wavenet.ug
+            createdAt: "2026-04-22T09:21:00+03:00"
+            lastUsedAt: "2026-04-22T09:21:00+03:00"
+            status: active
+    AuthSessionListResponseExample:
+      summary: Active sessions
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          - id: sess-20260422-001
+            device: MacBook Pro
+            browser: Chrome 125
+            ipAddress: 196.43.183.20
+            location: Kampala, Uganda
+            createdAt: "2026-04-22T08:00:00+03:00"
+            lastActiveAt: "2026-04-22T09:25:00+03:00"
+            current: true
+            status: active
+    AuthSessionResponseExample:
+      summary: Session revoked
+      value:
+        success: true
+        message: Session revoked successfully
+        data:
+          id: sess-20260421-003
+          device: Windows laptop
+          browser: Edge 125
+          ipAddress: 196.43.183.22
+          location: Kampala, Uganda
+          createdAt: "2026-04-21T08:00:00+03:00"
+          lastActiveAt: "2026-04-21T17:30:00+03:00"
+          current: false
+          status: revoked
+    WebAuthnOptionsResponseExample:
+      summary: WebAuthn registration options
+      value:
+        success: true
+        message: WebAuthn registration options generated
+        data:
+          challenge: 7f5d6b7c8a9e
+          rp:
+            id: portal.example.com
+            name: MTN Bulk Data Wholesale
+          user:
+            id: user-customer-001
+            name: operations@wavenet.ug
+            displayName: Sarah Namuli
+          pubKeyCredParams:
+            - type: public-key
+              alg: -7
+          timeout: 60000
+          authenticatorSelection:
+            residentKey: preferred
+            userVerification: preferred
+          attestation: none
+    WebAuthnDeviceRegistrationRequestExample:
+      summary: Register passkey device
+      value:
+        label: Sarah MacBook passkey
+        credentialId: webauthn-credential-001
+        transports: [internal]
+    WebAuthnDeviceResponseExample:
+      summary: WebAuthn device registered
+      value:
+        success: true
+        message: WebAuthn device registered successfully
+        data:
+          id: webauthn-device-001
+          label: Sarah MacBook passkey
+          credentialId: webauthn-credential-001
+          transports: [internal]
+          createdAt: "2026-04-22T09:30:00+03:00"
+          lastUsedAt: "2026-04-22T09:30:00+03:00"
+          status: active
+    WebAuthnDeviceListResponseExample:
+      summary: WebAuthn devices
+      value:
+        success: true
+        message: Operation completed successfully
+        data:
+          - id: webauthn-device-001
+            label: Sarah MacBook passkey
+            credentialId: webauthn-credential-001
+            transports: [internal]
+            createdAt: "2026-04-22T09:30:00+03:00"
+            lastUsedAt: "2026-04-22T09:30:00+03:00"
+            status: active
+    WebAuthnDeviceRevokedResponseExample:
+      summary: WebAuthn device revoked
+      value:
+        success: true
+        message: WebAuthn device revoked successfully
+        data:
+          id: webauthn-device-001
+          label: Sarah MacBook passkey
+          credentialId: webauthn-credential-001
+          transports: [internal]
+          createdAt: "2026-04-22T09:30:00+03:00"
+          lastUsedAt: "2026-04-22T09:30:00+03:00"
+          status: revoked
+    AuditEventListResponseExample:
+      summary: Audit table
+      value:
+        success: true
+        message: Records fetched successfully
+        data:
+          - id: audit-001
+            category: security
+            action: Login success
+            actor: operations@wavenet.ug
+            outcome: success
+            createdAt: "2026-04-22T09:00:00+03:00"
+        meta:
+          page: 1
+          limit: 10
+          total: 1
+          totalPages: 1
+          hasNextPage: false
+          hasPreviousPage: false
+    ErrorResponseExample:
+      summary: Validation error
+      value:
+        success: false
+        message: Validation failed
+        data: null
+  schemas:
+    ApiEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data: {}
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    AuthLoginRequest:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [otp, password, passkey]
+          description: Login method selected by the user.
+        identifier:
+          type: string
+          description: Phone number, email address, or TIN for OTP login.
+          example: "+256772991001"
+        identifierKind:
+          type: string
+          enum: [phone, email, tin]
+          description: Normalized identifier type supplied by the frontend for OTP login.
+        otp:
+          type: string
+          pattern: "^\\d{5}$"
+          description: Five-digit OTP code for customer OTP login.
+          example: "12345"
+        email:
+          type: string
+          format: email
+          description: Email address for password login.
+          example: joseph.balikuddembe@example.com
+        username:
+          type: string
+          description: Username for password login.
+          example: jbalikuddembe
+        phoneNumber:
+          type: string
+          description: Phone number for password login.
+          example: "+256789172796"
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: Password for password login.
+        credentialId:
+          type: string
+          description: WebAuthn credential identifier for passkey login.
+    AccountActivationOtpRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: Activation token from the account activation link sent to the contact person.
+    AccountActivationOtpResult:
+      type: object
+      required: [activationId, maskedEmail, expiresAt, retryAfterSeconds]
+      properties:
+        activationId:
+          type: string
+        maskedEmail:
+          type: string
+          example: sa***@wavenet.ug
+        expiresAt:
+          type: string
+          format: date-time
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+    AccountActivationOtpVerificationRequest:
+      type: object
+      required: [token, activationId, otp]
+      properties:
+        token:
+          type: string
+        activationId:
+          type: string
+        otp:
+          type: string
+          pattern: "^\\d{6}$"
+          example: "123456"
+    AccountActivationOtpVerificationResult:
+      type: object
+      required: [passwordSetupToken, expiresAt]
+      properties:
+        passwordSetupToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    AccountActivationPasswordRequest:
+      type: object
+      required: [passwordSetupToken, password, confirmPassword]
+      properties:
+        passwordSetupToken:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 12
+          writeOnly: true
+          description: Must satisfy the platform password rules.
+        confirmPassword:
+          type: string
+          format: password
+          writeOnly: true
+    AuthenticatedUser:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, support, customer]
+        customerId:
+          type: string
+          description: Present when the signed-in user is linked to a customer account.
+    StaffUserCreateRequest:
+      type: object
+      required: [phoneNumber, email, lanId, role]
+      properties:
+        phoneNumber:
+          type: string
+          description: Staff phone number used for account contact and verification challenges.
+          example: "+256789172796"
+        email:
+          type: string
+          format: email
+          description: Staff email address.
+          example: support.agent@example.com
+        lanId:
+          type: string
+          description: Corporate login identifier for the user.
+          pattern: "^[A-Za-z0-9._-]+$"
+          example: support.agent
+        role:
+          type: string
+          enum: [ADMIN, SUPPORT]
+          description: Staff role to assign.
+          example: SUPPORT
+    UserAccount:
+      type: object
+      required:
+        - id
+        - email
+        - authProvider
+        - roles
+        - status
+        - emailVerified
+        - isLocked
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+        authProvider:
+          type: string
+          enum: [LOCAL, GOOGLE, MICROSOFT, ACTIVE_DIRECTORY]
+        externalId:
+          type: string
+          description: External identity reference used by the configured authentication provider.
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [SUPER_ADMIN, ADMIN, CUSTOMER, SUPPORT]
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, INACTIVE, SUSPENDED, LOCKED]
+        emailVerified:
+          type: boolean
+        isLocked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PasswordlessSetupPrompt:
+      type: object
+      required: [title, message, setupUrl]
+      properties:
+        title:
+          type: string
+          example: Set up passwordless login
+        message:
+          type: string
+          example: Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock.
+        setupUrl:
+          type: string
+          example: /console?section=security
+          description: Frontend route opened when the user chooses to set up passkeys after login.
+    AuthLoginResult:
+      type: object
+      required: [user, session, nextRoute, promptPasswordlessSetup]
+      properties:
+        mfaRequired:
+          type: boolean
+          enum: [false]
+        user:
+          $ref: "#/components/schemas/AuthenticatedUser"
+        session:
+          type: object
+          required: [id, expiresAt]
+          properties:
+            id:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
+        nextRoute:
+          type: string
+          example: /console
+        promptPasswordlessSetup:
+          type: boolean
+          description: When true, the frontend shows the post-login passkey setup prompt.
+        passwordlessSetupPrompt:
+          $ref: "#/components/schemas/PasswordlessSetupPrompt"
+    AuthMfaChallenge:
+      type: object
+      required: [mfaRequired, challengeToken, challengeId, mfaMethod, user]
+      properties:
+        mfaRequired:
+          type: boolean
+          enum: [true]
+        challengeToken:
+          type: string
+        challengeId:
+          type: string
+        mfaMethod:
+          type: string
+          enum: [totp, email-otp, sms-otp, webauthn, recovery-code]
+          description: Email OTP is the default staff MFA method when no stronger factor is primary.
+        user:
+          $ref: "#/components/schemas/AuthenticatedUser"
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPreviousPage]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 1
+        hasNextPage:
+          type: boolean
+        hasPreviousPage:
+          type: boolean
+    ErrorEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: false
+        message:
+          type: string
+        data:
+          type: "null"
+    UgandaPhoneNumber:
+      type: string
+      description: E.164 Uganda phone/MSISDN. Must start with +256 followed by 77, 78, 79, 76, or 39 and 7 digits.
+      pattern: "^\\+256(77|78|79|76|39)\\d{7}$"
+      example: "+256772990001"
+    ProvisioningNormalizedMsisdn:
+      type: string
+      description: Provisioning-normalized Uganda MTN MSISDN without the leading plus sign.
+      pattern: "^256(77|78|79|76|39)\\d{7}$"
+      example: "256772990001"
+    ProvisioningGroupMemberPair:
+      type: object
+      required: [secondaryMsisdn, primaryMsisdn]
+      properties:
+        secondaryMsisdn:
+          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
+        primaryMsisdn:
+          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
+    ProvisioningAddGroupMemberRequest:
+      $ref: "#/components/schemas/ProvisioningGroupMemberPair"
+    ProvisioningAddGroupMembersBulkRequest:
+      type: object
+      required: [groupMembers]
+      properties:
+        groupMembers:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/ProvisioningGroupMemberPair"
+    ProvisioningDeleteGroupMemberRequest:
+      type: object
+      required: [secondaryMsisdn]
+      properties:
+        secondaryMsisdn:
+          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
+    ProvisioningUpdateSubscriptionRequest:
+      type: object
+      required:
+        - primaryMsisdn
+        - serviceCode
+        - transactionId
+        - topupValue
+        - updateAttemptCount
+      properties:
+        primaryMsisdn:
+          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
+        serviceCode:
+          type: string
+          example: DATA_BUNDLE_CODE
+        transactionId:
+          type: string
+          example: "567123456"
+        topupValue:
+          type: integer
+          minimum: 1
+          description: Top-up volume in kilobytes (KB). Purchase workflows must convert bundle volume to KB before calling this endpoint.
+          example: 1024
+        updateAttemptCount:
+          type: integer
+          minimum: 0
+          example: 4
+    ProvisioningAddSubscriberRequest:
+      type: object
+      required: [msisdn, transactionId]
+      properties:
+        msisdn:
+          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
+        transactionId:
+          type: string
+          example: "78954566743"
+    ProvisioningCommandResult:
+      type: object
+      required:
+        [
+          requestId,
+          operation,
+          accepted,
+          processedAt,
+          providerStatusCode,
+          request,
+        ]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          enum:
+            - add_group_member
+            - add_group_members_bulk
+            - delete_group_member
+            - update_subscription
+            - add_subscriber
+            - subscribe_service
+        accepted:
+          type: boolean
+          example: true
+        processedAt:
+          type: string
+          format: date-time
+        providerStatusCode:
+          type: integer
+          example: 200
+        request:
+          type: object
+        providerResponse:
+          type: object
+          additionalProperties: true
+          nullable: true
+          example:
+            successful: true
+            resultCode: "0"
+            message: Operation succeeded
+    ProvisioningAddGroupMemberResult:
+      allOf:
+        - $ref: "#/components/schemas/ProvisioningCommandResult"
+        - type: object
+          properties:
+            request:
+              $ref: "#/components/schemas/ProvisioningAddGroupMemberRequest"
+    ProvisioningAddGroupMembersBulkResult:
+      allOf:
+        - $ref: "#/components/schemas/ProvisioningCommandResult"
+        - type: object
+          properties:
+            request:
+              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkRequest"
+    ProvisioningDeleteGroupMemberResult:
+      allOf:
+        - $ref: "#/components/schemas/ProvisioningCommandResult"
+        - type: object
+          properties:
+            request:
+              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberRequest"
+    ProvisioningUpdateSubscriptionResult:
+      allOf:
+        - $ref: "#/components/schemas/ProvisioningCommandResult"
+        - type: object
+          properties:
+            request:
+              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionRequest"
+    ProvisioningAddSubscriberResult:
+      allOf:
+        - $ref: "#/components/schemas/ProvisioningCommandResult"
+        - type: object
+          properties:
+            request:
+              $ref: "#/components/schemas/ProvisioningAddSubscriberRequest"
+    Customer:
+      type: object
+      required:
+        - id
+        - businessName
+        - registrationNumber
+        - businessEmail
+        - businessPhone
+        - contactPerson
+        - email
+        - phone
+        - apnName
+        - apnId
+        - primaryMsisdns
+        - secondaryCount
+        - bundlePurchases
+        - totalSpendUgx
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+        businessName:
+          type: string
+        registrationNumber:
+          type: string
+        businessEmail:
+          type: string
+          format: email
+        businessPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        contactPerson:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        apnName:
+          type: string
+        apnId:
+          type: string
+        primaryMsisdns:
+          type: array
+          items:
+            $ref: "#/components/schemas/UgandaPhoneNumber"
+        secondaryCount:
+          type: integer
+        bundlePurchases:
+          type: integer
+        totalSpendUgx:
+          type: number
+        status:
+          type: string
+          enum: [active, deactivated, pending]
+        deactivationReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CustomerRegistrationRequest:
+      type: object
+      required:
+        - businessName
+        - registrationNumber
+        - businessEmail
+        - businessPhone
+        - contactPerson
+        - contactEmail
+        - contactPhone
+        - apnName
+        - apnId
+        - primaryMsisdn
+      properties:
+        businessName:
+          type: string
+        registrationNumber:
+          type: string
+        businessEmail:
+          type: string
+          format: email
+        businessPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        contactPerson:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        apnName:
+          type: string
+        apnId:
+          type: string
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+    CustomerActivationNotice:
+      type: object
+      required: [activationToken, activationUrl, expiresAt, deliveryChannels]
+      description: Activation details produced after successful customer registration. In production, the token is delivered by email rather than exposed to browser users.
+      properties:
+        activationToken:
+          type: string
+        activationUrl:
+          type: string
+          example: /auth/activate?token=act_demo
+        expiresAt:
+          type: string
+          format: date-time
+        deliveryChannels:
+          type: array
+          items:
+            type: string
+            enum: [business_email, contact_email]
+    CustomerUpdateRequest:
+      type: object
+      properties:
+        businessName:
+          type: string
+        businessEmail:
+          type: string
+          format: email
+        businessPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        contactPerson:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        apnName:
+          type: string
+        apnId:
+          type: string
+    CustomerStatusChangeRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          enum: [active, deactivated]
+        reason:
+          type: string
+        supportingNote:
+          type: string
+    ServiceRequestRequest:
+      type: object
+      required: [businessName, contactPerson, contactEmail, contactPhone]
+      properties:
+        businessName:
+          type: string
+          minLength: 2
+          maxLength: 120
+          example: WaveNet
+        contactPerson:
+          type: string
+          minLength: 2
+          maxLength: 120
+          example: Sarah Namuli
+        contactEmail:
+          type: string
+          format: email
+          maxLength: 160
+          example: operations@wavenet.ug
+        contactPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        preferredPackageId:
+          type: string
+          description: Optional bundle package identifier selected from the public package catalog.
+          example: bundle-1tb
+        message:
+          type: string
+          maxLength: 800
+          example: We need wholesale data for branches and managed device fleets.
+    ServiceRequest:
+      type: object
+      required:
+        [
+          id,
+          businessName,
+          contactPerson,
+          contactEmail,
+          contactPhone,
+          status,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: string
+        businessName:
+          type: string
+        contactPerson:
+          type: string
+        contactEmail:
+          type: string
+          format: email
+        contactPhone:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        preferredPackageId:
+          type: string
+        preferredPackageName:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+          enum: [new, contacted, converted]
+        createdAt:
+          type: string
+          format: date-time
+    ServiceRequestUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [new, contacted]
+        note:
+          type: string
+          maxLength: 500
+          description: Optional internal note for audit or CRM follow-up.
+    PrimaryMsisdnRequest:
+      type: object
+      required: [primaryMsisdn]
+      properties:
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+    MsisdnValidationResult:
+      type: object
+      required: [msisdn, accepted, reason, apnIds, registeredApnId]
+      properties:
+        msisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        accepted:
+          type: boolean
+        reason:
+          type: string
+        apnIds:
+          type: array
+          items:
+            type: string
+        registeredApnId:
+          type: string
+        provisioningAction:
+          type: string
+          enum: [addSubscriber, addGroupMember, addMultipleGroupMember]
+    BundleOffer:
+      type: object
+      required:
+        [
+          id,
+          serviceCode,
+          name,
+          volumeTb,
+          priceUgx,
+          validityDays,
+          status,
+          visible,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+        serviceCode:
+          type: string
+          example: BDS-1T-30D
+        name:
+          type: string
+          example: Wholesale 1 TB
+        volumeTb:
+          type: number
+          maximum: 4
+          exclusiveMinimum: 0
+        priceUgx:
+          type: number
+          minimum: 1
+        validityDays:
+          type: integer
+          const: 30
+          description: Bundle validity is fixed at 30 days by the solution document.
+        status:
+          type: string
+          enum: [active, paused, disabled]
+        visible:
+          type: boolean
+          description: Controls whether the package is visible to customer purchase flows.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BundlePackageRequest:
+      type: object
+      required:
+        [serviceCode, name, volumeTb, priceUgx, validityDays, status, visible]
+      properties:
+        serviceCode:
+          type: string
+          example: BDS-1T-30D
+        name:
+          type: string
+          example: Wholesale 1 TB
+        volumeTb:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 4
+        priceUgx:
+          type: integer
+          minimum: 1
+          example: 2300000
+        validityDays:
+          type: integer
+          const: 30
+          example: 30
+        status:
+          type: string
+          enum: [active, paused, disabled]
+        visible:
+          type: boolean
+    BundlePackageUpdateRequest:
+      type: object
+      properties:
+        serviceCode:
+          type: string
+        name:
+          type: string
+        volumeTb:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 4
+        priceUgx:
+          type: integer
+          minimum: 1
+        validityDays:
+          type: integer
+          const: 30
+        status:
+          type: string
+          enum: [active, paused, disabled]
+        visible:
+          type: boolean
+    PurchaseRequest:
+      type: object
+      required:
+        [customerId, primaryMsisdn, bundleId, provisioningCount, paymentMethod]
+      properties:
+        customerId:
+          type: string
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        bundleId:
+          type: string
+        provisioningCount:
+          type: integer
+          minimum: 1
+          maximum: 12
+        paymentMethod:
+          type: string
+          enum: [mobile_money, airtime, prn, card]
+        payingMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        prnProvider:
+          type: string
+          enum: [bank, mobile_money]
+          description: Required when paymentMethod is prn.
+        autoRenew:
+          type: boolean
+        redirectUrl:
+          type: string
+          format: uri
+          description: Card gateway return URL.
+        additionalInfo:
+          type: string
+          maxLength: 300
+          description: Optional PRN provider note.
+    PurchaseRetryRequest:
+      type: object
+      properties:
+        paymentMethod:
+          type: string
+          enum: [mobile_money, airtime, prn, card]
+          description: Optional override. Defaults to the failed transaction payment method.
+        payingMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        prnProvider:
+          type: string
+          enum: [bank, mobile_money]
+          description: Required when retrying as PRN if the backend cannot infer a default provider.
+        redirectUrl:
+          type: string
+          format: uri
+          description: Card gateway return URL.
+        additionalInfo:
+          type: string
+          maxLength: 300
+          description: Optional PRN provider note.
+    Transaction:
+      type: object
+      required:
+        [
+          id,
+          customerName,
+          primaryMsisdn,
+          bundleName,
+          paymentMethod,
+          amountUgx,
+          status,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: string
+        customerName:
+          type: string
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        bundleName:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [mobile_money, airtime, prn, card]
+        amountUgx:
+          type: number
+        status:
+          type: string
+          enum: [provisioned, pending, failed]
+        createdAt:
+          type: string
+          format: date-time
+    ReportTransaction:
+      allOf:
+        - $ref: "#/components/schemas/Transaction"
+        - type: object
+          required: [customerId, registrationNumber, apnId]
+          properties:
+            customerId:
+              type: string
+            registrationNumber:
+              type: string
+            apnId:
+              type: string
+    PurchaseResult:
+      type: object
+      required: [transaction, paymentSession]
+      properties:
+        transaction:
+          $ref: "#/components/schemas/Transaction"
+        paymentSession:
+          $ref: "#/components/schemas/PaymentSession"
+    PurchaseConfirmationRequest:
+      type: object
+      required: [sessionId, status]
+      properties:
+        sessionId:
+          type: string
+        status:
+          type: string
+          enum: [confirmed, failed]
+    PaymentProviderCallbackRequest:
+      type: object
+      description: >
+        Provider callback. At least one identifier is required: sessionId,
+        transactionId/clientTransactionId, internalTransactionId,
+        providerReference, or paymentReference. PRN callbacks may omit status
+        because a provider callback is treated as paid once the PRN session is
+        resolved.
+      properties:
+        sessionId:
+          type: string
+        transactionId:
+          type: string
+        internalTransactionId:
+          type: string
+          example: 6bc9766c-4f33-4493-a22c-1cc52c7ac365
+        clientTransactionId:
+          type: string
+          example: TXN-123456789
+        paymentReference:
+          type: string
+          example: A2086517260219
+        status:
+          type: string
+          enum:
+            [
+              awaiting_payment,
+              processing,
+              confirmed,
+              paid,
+              approved,
+              deducted,
+              failed,
+              expired,
+            ]
+        providerReference:
+          type: string
+        receiptNumber:
+          type: string
+        failureReason:
+          type: string
+    PurchaseConfirmationResult:
+      type: object
+      required: [transaction, paymentSession, provisioningRequest]
+      properties:
+        transaction:
+          $ref: "#/components/schemas/Transaction"
+        paymentSession:
+          $ref: "#/components/schemas/PaymentSession"
+        provisioningRequest:
+          type: object
+          required: [subscribeService, modifySubSubscription, srvTopupCount]
+          properties:
+            subscribeService:
+              type: boolean
+            modifySubSubscription:
+              type: boolean
+            srvTopupCount:
+              type: integer
+            providerResult:
+              $ref: "#/components/schemas/ProvisioningCommandResult"
+    PaymentSession:
+      type: object
+      required:
+        [
+          id,
+          transactionId,
+          paymentMethod,
+          status,
+          amountUgx,
+          currency,
+          socketEvent,
+          socketRoom,
+          expiresAt,
+          createdAt,
+          customerId,
+          bundleId,
+          provisioningCount,
+        ]
+      properties:
+        id:
+          type: string
+        transactionId:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [mobile_money, airtime, prn, card]
+        status:
+          type: string
+          enum: [awaiting_payment, processing, confirmed, failed, expired]
+        amountUgx:
+          type: number
+        currency:
+          type: string
+          enum: [UGX]
+        prn:
+          type: string
+          description: Generated payment registration number for PRN payments.
+        provider:
+          type: string
+          enum: [bank, mobile_money]
+        providerTransactionId:
+          type: string
+          description: External provider transaction identifier, such as PRN internalTransactionId.
+        providerReference:
+          type: string
+          description: External provider reference, such as PRN paymentReference.
+        providerGeneratedAt:
+          type: string
+          format: date-time
+          description: Timestamp returned by the external provider when the reference was generated.
+        paymentUrl:
+          type: string
+          format: uri
+          description: Secure gateway URL for card payments.
+        socketEvent:
+          type: string
+          example: payment.status
+        socketRoom:
+          type: string
+          example: payments:pay-abc123
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        customerId:
+          type: string
+        bundleId:
+          type: string
+        provisioningCount:
+          type: integer
+          minimum: 1
+          maximum: 12
+    PaymentStatusEvent:
+      type: object
+      required: [sessionId, transactionId, status, message]
+      description: Socket.IO payload emitted on payment.status and the session-specific socketEvent.
+      properties:
+        sessionId:
+          type: string
+        transactionId:
+          type: string
+        status:
+          type: string
+          enum: [awaiting_payment, processing, confirmed, failed, expired]
+        message:
+          type: string
+        provider:
+          type: string
+          enum: [bank, mobile_money]
+        receiptNumber:
+          type: string
+        paidAt:
+          type: string
+          format: date-time
+    SecondaryNumber:
+      type: object
+      required: [id, customerId, primaryMsisdn, msisdn, apnId, status, addedAt]
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        msisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        apnId:
+          type: string
+        status:
+          type: string
+          enum: [active, removed]
+        addedAt:
+          type: string
+          format: date-time
+    SecondaryUsageResult:
+      type: object
+      required:
+        - customerId
+        - primaryMsisdn
+        - secondaryMsisdn
+        - bundleName
+        - allocatedVolumeGb
+        - usedVolumeGb
+        - remainingVolumeGb
+        - usagePercent
+        - lastUsedAt
+        - status
+      properties:
+        customerId:
+          type: string
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        secondaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        bundleName:
+          type: string
+        allocatedVolumeGb:
+          type: number
+          format: float
+        usedVolumeGb:
+          type: number
+          format: float
+        remainingVolumeGb:
+          type: number
+          format: float
+        usagePercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        lastUsedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, removed]
+    SecondaryNumberRequest:
+      type: object
+      required: [msisdn]
+      properties:
+        msisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+    SecondaryBulkRequest:
+      type: object
+      required: [msisdns]
+      properties:
+        msisdns:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/UgandaPhoneNumber"
+    SecondaryBulkResult:
+      type: object
+      required: [added, rejected]
+      properties:
+        added:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecondaryNumber"
+        rejected:
+          type: array
+          items:
+            $ref: "#/components/schemas/MsisdnValidationResult"
+    BalanceResult:
+      type: object
+      required:
+        [
+          primaryMsisdn,
+          bundleName,
+          totalVolumeGb,
+          remainingVolumeGb,
+          expiryAt,
+          autoTopupRemaining,
+        ]
+      properties:
+        primaryMsisdn:
+          $ref: "#/components/schemas/UgandaPhoneNumber"
+        bundleName:
+          type: string
+        totalVolumeGb:
+          type: number
+        remainingVolumeGb:
+          type: number
+        expiryAt:
+          type: string
+          format: date-time
+        autoTopupRemaining:
+          type: integer
+    Metric:
+      type: object
+      required: [label, value, trend, tone]
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+        trend:
+          type: string
+        tone:
+          type: string
+          enum: [yellow, green, blue, red]
+    IntegrationHealth:
+      type: object
+      required: [name, status, latencyMs, lastCheckedAt]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [operational, degraded, offline]
+        latencyMs:
+          type: integer
+        lastCheckedAt:
+          type: string
+          format: date-time
+    RevenueTrendPoint:
+      type: object
+      required: [label, date, revenueUgx, purchases]
+      properties:
+        label:
+          type: string
+          example: "21 Apr"
+        date:
+          type: string
+          format: date
+          description: Bucket start date for the returned revenue trend point.
+        revenueUgx:
+          type: number
+          minimum: 0
+        purchases:
+          type: integer
+          minimum: 0
+    CustomerSpendPoint:
+      type: object
+      required: [customerName, spendUgx, purchases, secondaryNumbers]
+      properties:
+        customerName:
+          type: string
+        spendUgx:
+          type: number
+          minimum: 0
+        purchases:
+          type: integer
+          minimum: 0
+        secondaryNumbers:
+          type: integer
+          minimum: 0
+    PaymentMixPoint:
+      type: object
+      required: [paymentMethod, revenueUgx, transactions]
+      properties:
+        paymentMethod:
+          type: string
+          enum: [mobile_money, airtime, prn, card]
+        revenueUgx:
+          type: number
+          minimum: 0
+        transactions:
+          type: integer
+          minimum: 0
+    StatusBreakdownPoint:
+      type: object
+      required: [status, revenueUgx, transactions]
+      properties:
+        status:
+          type: string
+          enum: [provisioned, pending, failed]
+        revenueUgx:
+          type: number
+          minimum: 0
+        transactions:
+          type: integer
+          minimum: 0
+    IntegrationLatencyPoint:
+      type: object
+      required: [name, latencyMs, status]
+      properties:
+        name:
+          type: string
+        latencyMs:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [operational, degraded, offline]
+    OverviewAnalytics:
+      type: object
+      required:
+        [
+          revenueTrend,
+          customerSpend,
+          paymentMix,
+          statusBreakdown,
+          integrationLatency,
+        ]
+      properties:
+        revenueTrend:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevenueTrendPoint"
+        customerSpend:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerSpendPoint"
+        paymentMix:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentMixPoint"
+        statusBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusBreakdownPoint"
+        integrationLatency:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntegrationLatencyPoint"
+    Overview:
+      type: object
+      required:
+        [metrics, integrations, analytics, topCustomers, recentTransactions]
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/Metric"
+        integrations:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntegrationHealth"
+        analytics:
+          $ref: "#/components/schemas/OverviewAnalytics"
+        topCustomers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        recentTransactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+    AdminReport:
+      type: object
+      required: [transactions, customerActivity]
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        customerActivity:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                customerId,
+                customerName,
+                createdAt,
+                totalPrimaryNumbers,
+                totalSecondaryNumbers,
+                bundlesPurchased,
+                totalSpendUgx,
+                status,
+              ]
+            properties:
+              customerId:
+                type: string
+              customerName:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              totalPrimaryNumbers:
+                type: integer
+              totalSecondaryNumbers:
+                type: integer
+              bundlesPurchased:
+                type: integer
+              totalSpendUgx:
+                type: number
+              status:
+                type: string
+                enum: [active, deactivated, pending]
+    CustomerReport:
+      type: object
+      required: [customerId, bundlePurchaseHistory, secondaryNumbers, balances]
+      properties:
+        customerId:
+          type: string
+        bundlePurchaseHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        secondaryNumbers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecondaryNumber"
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/BalanceResult"
+    UserPreferences:
+      type: object
+      required:
+        [
+          theme,
+          language,
+          timezone,
+          defaultLanding,
+          dataDensity,
+          quietHours,
+          notifications,
+        ]
+      properties:
+        theme:
+          type: string
+          enum: [light, dark, system]
+        language:
+          type: string
+          enum: [en, lug]
+        timezone:
+          type: string
+        defaultLanding:
+          type: string
+          enum: [overview, admin, customer, security]
+        dataDensity:
+          type: string
+          enum: [comfortable, compact]
+        quietHours:
+          type: object
+          required: [enabled, start, end]
+          properties:
+            enabled:
+              type: boolean
+            start:
+              type: string
+              pattern: "^\\d{2}:\\d{2}$"
+            end:
+              type: string
+              pattern: "^\\d{2}:\\d{2}$"
+        notifications:
+          type: object
+          required: [email, sms, whatsapp, inApp]
+          properties:
+            email:
+              type: boolean
+            sms:
+              type: boolean
+            whatsapp:
+              type: boolean
+            inApp:
+              type: boolean
+    MfaConfiguration:
+      type: object
+      required:
+        [
+          services,
+          trustedDeviceDays,
+          stepUpForBundlePurchases,
+          stepUpForSecondaryNumberChanges,
+        ]
+      properties:
+        services:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                id,
+                label,
+                enabled,
+                requiredForAdmins,
+                requiredForCustomers,
+                lastUpdatedAt,
+              ]
+            properties:
+              id:
+                type: string
+                enum: [totp, email_otp, sms_otp, webauthn, recovery_codes]
+              label:
+                type: string
+              enabled:
+                type: boolean
+              requiredForAdmins:
+                type: boolean
+              requiredForCustomers:
+                type: boolean
+              lastUpdatedAt:
+                type: string
+                format: date-time
+        trustedDeviceDays:
+          type: integer
+          minimum: 0
+          maximum: 90
+        stepUpForBundlePurchases:
+          type: boolean
+        stepUpForSecondaryNumberChanges:
+          type: boolean
+    TotpAuthenticatorApp:
+      type: object
+      required: [id, label, issuer, accountName, createdAt, status]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          example: Microsoft Authenticator
+        issuer:
+          type: string
+          example: MTN Bulk Data Wholesale
+        accountName:
+          type: string
+          example: security.admin@mtn.co.ug
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, revoked]
+    TotpEnrollmentRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Microsoft Authenticator
+    TotpEnrollment:
+      type: object
+      required:
+        [
+          id,
+          label,
+          secret,
+          otpauthUrl,
+          issuer,
+          accountName,
+          qrCodeDataUrl,
+          recoveryCodes,
+          expiresAt,
+        ]
+      properties:
+        id:
+          type: string
+          description: Short-lived enrollment identifier required when verifying the six-digit code.
+        label:
+          type: string
+          example: Microsoft Authenticator
+        secret:
+          type: string
+          description: Base32 TOTP secret for manual entry. This value must only be returned during active enrollment.
+          example: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+        otpauthUrl:
+          type: string
+          format: uri
+          description: Standard otpauth URI consumed by Google Authenticator, Microsoft Authenticator, and compatible apps.
+        issuer:
+          type: string
+          example: MTN Bulk Data Wholesale
+        accountName:
+          type: string
+          example: security.admin@mtn.co.ug
+        qrCodeDataUrl:
+          type: string
+          description: Data URL containing a QR image generated from the otpauth URI.
+        recoveryCodes:
+          type: array
+          description: Recovery codes to copy/download during enrollment. Treat as secrets.
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+    TotpVerificationRequest:
+      type: object
+      required: [enrollmentId, code]
+      properties:
+        enrollmentId:
+          type: string
+        code:
+          type: string
+          pattern: "^\\d{6}$"
+          example: "123456"
+    TotpVerificationResult:
+      type: object
+      required: [enabled, recoveryCodes, verifiedAt]
+      properties:
+        enabled:
+          type: boolean
+        app:
+          $ref: "#/components/schemas/TotpAuthenticatorApp"
+        recoveryCodes:
+          type: array
+          items:
+            type: string
+        verifiedAt:
+          type: string
+          format: date-time
+    AuthSession:
+      type: object
+      required:
+        [
+          id,
+          device,
+          browser,
+          ipAddress,
+          location,
+          createdAt,
+          lastActiveAt,
+          current,
+          status,
+        ]
+      properties:
+        id:
+          type: string
+        device:
+          type: string
+          example: MacBook Pro
+        browser:
+          type: string
+          example: Chrome 125
+        ipAddress:
+          type: string
+          example: 196.43.183.20
+        location:
+          type: string
+          example: Kampala, Uganda
+        createdAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+        status:
+          type: string
+          enum: [active, revoked]
+    WebAuthnRegistrationOptions:
+      type: object
+      required:
+        [
+          challenge,
+          rp,
+          user,
+          pubKeyCredParams,
+          timeout,
+          authenticatorSelection,
+          attestation,
+        ]
+      properties:
+        challenge:
+          type: string
+        rp:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        user:
+          type: object
+          required: [id, name, displayName]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            displayName:
+              type: string
+        pubKeyCredParams:
+          type: array
+          items:
+            type: object
+            required: [type, alg]
+            properties:
+              type:
+                type: string
+                const: public-key
+              alg:
+                type: integer
+        timeout:
+          type: integer
+        authenticatorSelection:
+          type: object
+        attestation:
+          type: string
+    WebAuthnDevice:
+      type: object
+      required:
+        [id, label, credentialId, transports, createdAt, lastUsedAt, status]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        credentialId:
+          type: string
+        transports:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, revoked]
+    WebAuthnDeviceRegistrationRequest:
+      type: object
+      required: [label, credentialId, transports]
+      properties:
+        label:
+          type: string
+        credentialId:
+          type: string
+        transports:
+          type: array
+          items:
+            type: string
+    AuditEvent:
+      type: object
+      required: [id, category, action, actor, outcome, createdAt]
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [security, customer, bundle, integration]
+        action:
+          type: string
+        actor:
+          type: string
+        outcome:
+          type: string
+          enum: [success, warning, failed]
+        createdAt:
+          type: string
+          format: date-time
+    CustomerResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Customer"
+    AuthLoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              oneOf:
+                - $ref: "#/components/schemas/AuthLoginResult"
+                - $ref: "#/components/schemas/AuthMfaChallenge"
+    AccountActivationOtpResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AccountActivationOtpResult"
+    AccountActivationOtpVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AccountActivationOtpVerificationResult"
+    ProvisioningAddGroupMemberResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ProvisioningAddGroupMemberResult"
+    ProvisioningAddGroupMembersBulkResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkResult"
+    ProvisioningDeleteGroupMemberResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberResult"
+    ProvisioningUpdateSubscriptionResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionResult"
+    ProvisioningAddSubscriberResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ProvisioningAddSubscriberResult"
+    CustomerListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Customer"
+    CustomerRegistrationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [customer, validation, activation]
+              properties:
+                customer:
+                  $ref: "#/components/schemas/Customer"
+                validation:
+                  $ref: "#/components/schemas/MsisdnValidationResult"
+                activation:
+                  $ref: "#/components/schemas/CustomerActivationNotice"
+    ServiceRequestResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ServiceRequest"
+    ServiceRequestListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          required: [meta]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ServiceRequest"
+            meta:
+              $ref: "#/components/schemas/PaginationMeta"
+    ServiceRequestConversionResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [serviceRequest, customer, validation]
+              properties:
+                serviceRequest:
+                  $ref: "#/components/schemas/ServiceRequest"
+                customer:
+                  $ref: "#/components/schemas/Customer"
+                validation:
+                  $ref: "#/components/schemas/MsisdnValidationResult"
+    PrimaryMsisdnResponse:
+      $ref: "#/components/schemas/CustomerRegistrationResponse"
+    BundleListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/BundleOffer"
+    BundleResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BundleOffer"
+    PurchaseResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PurchaseResult"
+    PurchaseConfirmationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PurchaseConfirmationResult"
+    SecondaryNumberResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/SecondaryNumber"
+    SecondaryUsageResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/SecondaryUsageResult"
+    SecondaryNumberListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/SecondaryNumber"
+    SecondaryNumberMutationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [secondaryNumber, validation]
+              properties:
+                secondaryNumber:
+                  $ref: "#/components/schemas/SecondaryNumber"
+                validation:
+                  $ref: "#/components/schemas/MsisdnValidationResult"
+    SecondaryBulkResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/SecondaryBulkResult"
+    BalanceResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/BalanceResult"
+    OverviewResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Overview"
+    AdminReportResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AdminReport"
+    ReportTransactionListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          required: [meta]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/ReportTransaction"
+            meta:
+              $ref: "#/components/schemas/PaginationMeta"
+    CustomerReportResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CustomerReport"
+    UserPreferencesResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserPreferences"
+    MfaConfigurationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MfaConfiguration"
+    TotpEnrollmentResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TotpEnrollment"
+    TotpAuthenticatorAppListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/TotpAuthenticatorApp"
+    TotpVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TotpVerificationResult"
+    AuthSessionResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AuthSession"
+    AuthSessionListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuthSession"
+    WebAuthnOptionsResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebAuthnRegistrationOptions"
+    WebAuthnDeviceResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebAuthnDevice"
+    WebAuthnDeviceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/WebAuthnDevice"
+    AuditEventListResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuditEvent"

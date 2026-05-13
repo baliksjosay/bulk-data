@@ -1,0 +1,9 @@
+export enum AuthFactorType {
+  PASSWORD = 'PASSWORD',
+  TOTP = 'TOTP',
+  SMS_OTP = 'SMS_OTP',
+  EMAIL_OTP = 'EMAIL_OTP',
+  WEBAUTHN = 'WEBAUTHN',
+  PASSKEY = 'PASSKEY',
+  SECURITY_KEY = 'SECURITY_KEY',
+}

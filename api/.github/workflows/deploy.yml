@@ -1,0 +1,56 @@
+name: Build and Deploy to VM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  deploy:
+    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install SSH + Rsync
+        run: sudo apt-get update && sudo apt-get install -y sshpass rsync
+
+      - name: Deploy bamba API
+        run: |
+          sshpass -p "${{ secrets.VM_PASSWORD }}" ssh -o StrictHostKeyChecking=no \
+            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
+            'bash -lc "
+              set -euo pipefail
+              echo \"🚀 Deployment started...\"
+
+              export NVM_DIR=\$HOME/.nvm
+              [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
+
+              nvm use 25 >/dev/null
+
+              echo \"Node: \$(node -v)\"
+              echo \"NPM:  \$(npm -v)\"
+
+              cd /opt/bamba/api
+
+              # Ensure pm2 exists for this node version
+              command -v pm2 >/dev/null 2>&1 || npm i -g pm2
+
+              echo \"PM2:  \$(pm2 -v)\"
+              echo \"📦 Pulling + building...\"
+
+              git pull
+              yarn install --frozen-lockfile || yarn install
+              yarn build
+
+              echo \"🔄 Reloading PM2...\"
+              pm2 reload bamba --update-env || pm2 restart bamba --update-env
+
+              pm2 save
+
+              echo \"✅ bamba API deployed successfully!\"
+            "'
