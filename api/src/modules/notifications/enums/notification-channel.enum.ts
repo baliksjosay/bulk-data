@@ -1,4 +1,3 @@
-
 export enum NotificationChannel {
   EMAIL = 'email',
   SMS = 'sms',
@@ -6,7 +5,3 @@ export enum NotificationChannel {
   IN_APP = 'in_app',
   WEBSOCKET = 'websocket',
 }
-
-
-
-

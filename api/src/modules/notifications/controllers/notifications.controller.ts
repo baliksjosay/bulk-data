@@ -9,11 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { RegisterDeviceTokenDto } from '../dto/register-device-token.dto';
 import { MarkReadDto } from '../dto/mark-read.dto';
 import { NotificationQueryDto } from '../dto/notification-query.dto';
@@ -59,7 +55,10 @@ export class NotificationsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a single notification' })
-  findOne(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+  findOne(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.notificationsService.findOneForUser(userId, id);
   }
 

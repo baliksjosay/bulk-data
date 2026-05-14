@@ -8,11 +8,19 @@ import { NotificationType } from '../enums/notification-type.enum';
 // ---------------------------------------------------------------------------
 // Domain event shapes (mirror your existing events module if it exists)
 // ---------------------------------------------------------------------------
-interface UserCreatedEvent { userId: string; email: string }
-interface UserApprovedEvent { userId: string; adminUserId: string }
-interface UserRejectedEvent { userId: string; adminUserId: string; reason?: string }
-interface ObservationSyncedEvent { userId: string; opportunityCount: number }
-
+interface UserCreatedEvent {
+  userId: string;
+  email: string;
+}
+interface UserApprovedEvent {
+  userId: string;
+  adminUserId: string;
+}
+interface UserRejectedEvent {
+  userId: string;
+  adminUserId: string;
+  reason?: string;
+}
 @Injectable()
 export class NotificationEventsListener {
   private readonly logger = new Logger(NotificationEventsListener.name);
@@ -57,5 +65,4 @@ export class NotificationEventsListener {
       priority: NotificationPriority.NORMAL,
     });
   }
-
 }

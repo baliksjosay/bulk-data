@@ -76,6 +76,13 @@ export class WebsocketChannelService implements ChannelProvider {
     rendered: RenderedNotification,
     timestamp: Date,
   ) {
+    const notification = delivery.notification;
+    const recipient = delivery.recipient;
+    const createdAt =
+      recipient?.createdAt ?? notification?.createdAt ?? timestamp;
+    const updatedAt =
+      recipient?.updatedAt ?? notification?.updatedAt ?? timestamp;
+
     return {
       deliveryId: delivery.id,
       notificationId: delivery.notificationId,
@@ -85,6 +92,35 @@ export class WebsocketChannelService implements ChannelProvider {
       htmlBody: rendered.htmlBody ?? null,
       data: rendered.data ?? {},
       timestamp: timestamp.toISOString(),
+      notification:
+        notification && recipient
+          ? {
+              id: recipient.id,
+              notificationId: notification.id,
+              userId: recipient.userId,
+              email: recipient.email ?? null,
+              phoneNumber: recipient.phoneNumber ?? null,
+              isRead: recipient.isRead,
+              status: recipient.status,
+              readAt: recipient.readAt?.toISOString() ?? null,
+              dismissedAt: recipient.dismissedAt?.toISOString() ?? null,
+              createdAt: createdAt.toISOString(),
+              updatedAt: updatedAt.toISOString(),
+              notification: {
+                id: notification.id,
+                type: notification.type,
+                status: notification.status,
+                priority: notification.priority,
+                subject: rendered.subject ?? notification.subject ?? null,
+                body: rendered.body,
+                data: rendered.data ?? notification.data ?? null,
+                actionUrl: notification.actionUrl ?? null,
+                actionLabel: notification.actionLabel ?? null,
+                createdAt: notification.createdAt.toISOString(),
+                updatedAt: notification.updatedAt?.toISOString(),
+              },
+            }
+          : undefined,
     };
   }
 

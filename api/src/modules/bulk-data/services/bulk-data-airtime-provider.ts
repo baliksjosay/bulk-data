@@ -22,8 +22,8 @@ export function buildAirtimeUpdateBalanceUrl() {
   }
 
   const baseUrl = (
+    process.env.BULK_DATA_API_BASE_URL ??
     process.env.PROVISIONING_PCRF_BASE_URL ??
-    process.env.PCRF_BASE_URL ??
     ''
   ).trim();
 
@@ -51,7 +51,7 @@ export function buildAirtimeUpdateBalanceRequest(
     subscriberNumber: normalizeAirtimeSubscriberNumber(
       transaction.primaryMsisdn,
     ),
-    adjustmentAmountRelative: `-${Math.trunc(Math.abs(Number(session.amountUgx)))}`,
+    adjustmentAmountRelative: `${Math.trunc(Math.abs(Number(session.amountUgx)))}`,
   };
 }
 

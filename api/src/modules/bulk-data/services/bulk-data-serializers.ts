@@ -13,6 +13,7 @@ export function serializeCustomer(customer: BulkCustomerEntity) {
     id: customer.id,
     businessName: customer.businessName,
     registrationNumber: customer.registrationNumber,
+    tin: customer.tin,
     businessEmail: customer.businessEmail,
     businessPhone: customer.businessPhone,
     contactPerson: customer.contactPerson,

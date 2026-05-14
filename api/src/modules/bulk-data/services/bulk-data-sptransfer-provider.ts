@@ -59,14 +59,11 @@ export function buildMomoSpTransferRequestDetails(
   }
 
   const externalTransactionId = buildNumericTransactionId(transaction.id);
-  const fromFri =
-    process.env.PAYMENT_MOMO_SPTRANSFER_FROM_FRI?.trim() ||
-    normalizeMsisdn(payingMsisdn);
 
   return {
     url: buildMomoSpTransferUrl(),
     body: {
-      FromFri: fromFri,
+      FromFri: normalizeMsisdn(payingMsisdn),
       ToFri: toFri,
       Amount: Math.trunc(Math.abs(Number(session.amountUgx))),
       Currency: 'UGX',
@@ -86,6 +83,7 @@ export function buildMomoSpTransferUrl() {
   }
 
   const baseUrl = (
+    process.env.PAYMENT_MOMO_ECW_URL ??
     process.env.PAYMENT_MOMO_SPTRANSFER_BASE_URL ??
     process.env.ECW_API_URL ??
     ''
@@ -105,23 +103,7 @@ export function buildMomoSpTransferUrl() {
 export function buildMomoSpTransferHeaders(
   headers: Record<string, string>,
 ): Record<string, string> {
-  const username = (
-    process.env.PAYMENT_MOMO_SPTRANSFER_USERNAME ??
-    process.env.PAYMENT_MOMO_SPTRANSFER_TO_FRI ??
-    ''
-  ).trim();
-  const password = process.env.PAYMENT_MOMO_SPTRANSFER_PASSWORD ?? '';
-
-  if (!username || !password) {
-    return headers;
-  }
-
-  return {
-    ...headers,
-    Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString(
-      'base64',
-    )}`,
-  };
+  return headers;
 }
 
 export function assertSpTransferAccepted(body: SpTransferResponse) {

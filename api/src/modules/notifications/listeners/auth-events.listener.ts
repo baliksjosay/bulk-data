@@ -4,8 +4,21 @@ import { NotificationsService } from '../services/notifications.service';
 import { NotificationChannel } from '../enums/notification-channel.enum';
 import { NotificationPriority } from '../enums/notification-priority.enum';
 import { NotificationType } from '../enums/notification-type.enum';
-import { AccountActivatedEvent, AccountLockedEvent, AccountUnlockedEvent, EmailVerificationRequestedEvent, EmailVerifiedEvent, LoginWarningThresholdReachedEvent, MfaDisabledEvent, MfaEnabledEvent, PasswordResetCompletedEvent, PasswordResetRequestedEvent, PhoneVerificationRequestedEvent, PhoneVerifiedEvent, UserInvitedEvent } from '../interfaces/auth.interface';
-
+import {
+  AccountActivatedEvent,
+  AccountLockedEvent,
+  AccountUnlockedEvent,
+  EmailVerificationRequestedEvent,
+  EmailVerifiedEvent,
+  LoginWarningThresholdReachedEvent,
+  MfaDisabledEvent,
+  MfaEnabledEvent,
+  PasswordResetCompletedEvent,
+  PasswordResetRequestedEvent,
+  PhoneVerificationRequestedEvent,
+  PhoneVerifiedEvent,
+  UserInvitedEvent,
+} from '../interfaces/auth.interface';
 
 @Injectable()
 export class AuthNotificationEventsListener {

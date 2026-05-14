@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProvisioningModule } from '../provisioning/provisioning.module';
+import { AuthModule } from '../auth/auth.module';
+import { UserModule } from '../users/users.module';
 import {
   AuditController,
   BundlesController,
@@ -49,6 +51,8 @@ import { BulkDataServiceRequestsService } from './services/bulk-data-service-req
 @Module({
   imports: [
     ProvisioningModule,
+    AuthModule,
+    UserModule,
     TypeOrmModule.forFeature([
       BulkAuditEventEntity,
       BulkBalanceEntity,

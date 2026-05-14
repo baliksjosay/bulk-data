@@ -9,8 +9,7 @@ import {
 
 export class AddSubscriberDto {
   @ApiProperty({
-    description:
-      'Primary MSISDN to add as a subscriber. The concrete adapter enriches the upstream payload with provider-specific metadata required by business rules.',
+    description: 'Primary MSISDN to add as a subscriber through provisioning.',
     example: '256779999707',
   })
   @Transform(({ value }) =>

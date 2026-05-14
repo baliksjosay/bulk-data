@@ -27,7 +27,7 @@ export class EmailChannelService implements ChannelProvider {
     delivery: NotificationDelivery,
     rendered: RenderedNotification,
   ): Promise<void> {
-    const recipientEmail = delivery.recipient.email;
+    const recipientEmail = delivery.recipient?.email;
     if (!recipientEmail) {
       await this.fail(delivery, 'No recipient email address');
       return;
@@ -38,7 +38,7 @@ export class EmailChannelService implements ChannelProvider {
         to: recipientEmail,
         subject: rendered.subject ?? 'Bulk Data Wholesale Notification',
         text: rendered.body,
-        html: rendered.htmlBody,
+        html: rendered.htmlBody ?? this.renderPlainTextHtml(rendered.body),
       });
       await this.deliveryRepo.update(delivery.id, {
         status: NotificationStatus.SENT,
@@ -46,10 +46,49 @@ export class EmailChannelService implements ChannelProvider {
         attemptCount: delivery.attemptCount + 1,
         lastAttemptAt: new Date(),
       });
+      this.logger.log(
+        JSON.stringify({
+          event: 'notification_delivery',
+          channel: this.channel,
+          deliveryId: delivery.id,
+          outcome: 'sent',
+        }),
+      );
     } catch (error) {
       await this.fail(delivery, (error as Error).message);
+      this.logger.error(
+        JSON.stringify({
+          event: 'notification_delivery',
+          channel: this.channel,
+          deliveryId: delivery.id,
+          outcome: 'failed',
+          reason:
+            error instanceof Error ? error.message : 'email_delivery_failed',
+        }),
+        (error as Error).stack,
+      );
       throw error;
     }
+  }
+
+  private renderPlainTextHtml(body: string): string {
+    const html = body
+      .split(/\r?\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .map((paragraph) => `<p>${this.escapeHtml(paragraph)}</p>`)
+      .join('');
+
+    return html || '<p></p>';
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private async fail(

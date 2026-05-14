@@ -10,6 +10,7 @@ import { CustomerStatus } from '../dto/bulk-data.dto';
 
 @Entity('bulk_data_customers')
 @Index(['registrationNumber'], { unique: true })
+@Index(['tin'])
 @Index(['businessName'])
 @Index(['status'])
 export class BulkCustomerEntity {
@@ -21,6 +22,9 @@ export class BulkCustomerEntity {
 
   @Column()
   registrationNumber: string;
+
+  @Column({ nullable: true })
+  tin?: string | null;
 
   @Column()
   businessEmail: string;

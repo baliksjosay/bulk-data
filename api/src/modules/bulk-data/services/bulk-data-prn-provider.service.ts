@@ -45,7 +45,7 @@ export class BulkDataPrnProviderService {
 
     const body = await this.postProviderRequest(
       providerInitUrl,
-      this.prnHeaders(),
+      this.jsonHeaders(),
       buildPrnReferenceRequest(session, transaction, bundle, options),
       this.timeoutMs(),
     );
@@ -152,26 +152,11 @@ export class BulkDataPrnProviderService {
     }
   }
 
-  private prnHeaders() {
-    const headers: Record<string, string> = {
+  private jsonHeaders() {
+    return {
+      Accept: 'application/json',
       'Content-Type': 'application/json',
     };
-    const bearerToken =
-      this.getString('payments.prnProvider.bearerToken') ||
-      this.getString('payments.provider.bearerToken');
-    const apiKey =
-      this.getString('payments.prnProvider.apiKey') ||
-      this.getString('payments.provider.apiKey');
-
-    if (bearerToken) {
-      headers.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    if (apiKey) {
-      headers['x-api-key'] = apiKey;
-    }
-
-    return headers;
   }
 
   private timeoutMs() {

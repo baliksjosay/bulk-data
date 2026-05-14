@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.interface';
+import { WebsocketGateway } from 'src/modules/notifications/services/notification-websocket.service';
 import { UserRole } from 'src/modules/users/enums/user-role.enum';
 import {
   BundlePackageDto,
@@ -23,6 +24,7 @@ export class BulkDataBundlesService {
   constructor(
     private readonly access: BulkDataAccessService,
     private readonly bundles: BulkBundlesRepository,
+    private readonly websocketGateway: WebsocketGateway,
   ) {}
 
   async listBundles(query: ListQueryDto) {
@@ -71,6 +73,14 @@ export class BulkDataBundlesService {
       actor.email,
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'bundle',
+      action: 'created',
+      entityId: bundle.id,
+      status: bundle.status,
+      message: 'Package created',
+      metadata: { visible: bundle.visible },
+    });
     return ok(serializeBundle(bundle), 'Package created successfully');
   }
 
@@ -113,6 +123,14 @@ export class BulkDataBundlesService {
       actor.email,
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'bundle',
+      action: 'updated',
+      entityId: saved.id,
+      status: saved.status,
+      message: 'Package updated',
+      metadata: { visible: saved.visible },
+    });
     return ok(serializeBundle(saved), 'Package updated successfully');
   }
 }

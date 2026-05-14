@@ -131,7 +131,7 @@ export class BulkDataPaymentProviderService {
     bundle: BulkBundleEntity,
     options: PaymentSessionOptions,
   ) {
-    const providerInitUrl = process.env.PAYMENT_PROVIDER_INIT_URL?.trim();
+    const providerInitUrl = buildCardProviderInitUrl();
 
     if (!providerInitUrl) {
       return buildMockProviderCheckoutUrl(session, options.redirectUrl);
@@ -229,7 +229,7 @@ export class BulkDataPaymentProviderService {
 
     await this.postProviderRequest(
       providerInitUrl,
-      this.channelPaymentHeaders('MOMO'),
+      this.channelPaymentHeaders(),
       {
         sessionId: session.id,
         transactionId: transaction.id,
@@ -284,7 +284,7 @@ export class BulkDataPaymentProviderService {
 
     const body = await this.postProviderRequest(
       request.url,
-      buildMomoSpTransferHeaders(this.channelPaymentHeaders('MOMO')),
+      buildMomoSpTransferHeaders(this.channelPaymentHeaders()),
       request.body,
       'Mobile money SP transfer initiation failed',
       this.providerTimeoutMs(
@@ -321,7 +321,7 @@ export class BulkDataPaymentProviderService {
 
     const body = await this.postProviderRequest(
       providerInitUrl,
-      this.channelPaymentHeaders('AIRTIME'),
+      this.channelPaymentHeaders(),
       request,
       'Airtime provider initiation failed',
       this.providerTimeoutMs(
@@ -428,47 +428,24 @@ export class BulkDataPaymentProviderService {
   }
 
   private defaultPaymentHeaders() {
-    const headers: Record<string, string> = {
+    return {
+      Accept: 'application/json',
       'Content-Type': 'application/json',
     };
-    const bearerToken = process.env.PAYMENT_PROVIDER_BEARER_TOKEN?.trim();
-    const apiKey = process.env.PAYMENT_PROVIDER_API_KEY?.trim();
-
-    if (bearerToken) {
-      headers.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    if (apiKey) {
-      headers['x-api-key'] = apiKey;
-    }
-
-    return headers;
   }
 
   private providerTimeoutMs(primaryKey: string, fallbackKey?: string) {
     return Number.parseInt(
       process.env[primaryKey] ??
-        (fallbackKey ? process.env[fallbackKey] : '') ??
+        (fallbackKey ? process.env[fallbackKey] : undefined) ??
+        process.env.BULK_DATA_API_TIMEOUT_MS ??
         '15000',
       10,
     );
   }
 
-  private channelPaymentHeaders(channel: 'PRN' | 'MOMO' | 'AIRTIME') {
-    const headers = this.defaultPaymentHeaders();
-    const bearerToken =
-      process.env[`PAYMENT_${channel}_PROVIDER_BEARER_TOKEN`]?.trim();
-    const apiKey = process.env[`PAYMENT_${channel}_PROVIDER_API_KEY`]?.trim();
-
-    if (bearerToken) {
-      headers.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    if (apiKey) {
-      headers['x-api-key'] = apiKey;
-    }
-
-    return headers;
+  private channelPaymentHeaders() {
+    return this.defaultPaymentHeaders();
   }
 
   private extractProviderPaymentUrl(
@@ -487,4 +464,33 @@ export class BulkDataPaymentProviderService {
         ? this.extractProviderPaymentUrl(body.result)
         : undefined;
   }
+}
+
+function buildCardProviderInitUrl() {
+  const explicitUrl = process.env.PAYMENT_PROVIDER_INIT_URL?.trim();
+
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  return buildBulkDataApiUrl(process.env.PAYMENT_CARD_PROVIDER_INIT_PATH);
+}
+
+function buildBulkDataApiUrl(path?: string) {
+  const baseUrl = (
+    process.env.BULK_DATA_API_BASE_URL ??
+    process.env.PROVISIONING_PCRF_BASE_URL ??
+    ''
+  ).trim();
+  const normalizedPath = path?.trim();
+
+  if (!baseUrl || !normalizedPath) {
+    return '';
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+
+  return new URL(normalizedPath.replace(/^\/+/, ''), normalizedBase)
+    .toString()
+    .trim();
 }

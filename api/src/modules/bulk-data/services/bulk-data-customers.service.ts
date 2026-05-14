@@ -4,8 +4,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.interface';
+import { WebsocketGateway } from 'src/modules/notifications/services/notification-websocket.service';
 import { UserRole } from 'src/modules/users/enums/user-role.enum';
+import { UserStatus } from 'src/modules/users/enums/user-status.enum';
+import { UserService } from 'src/modules/users/services/user.service';
+import { ActivationService } from 'src/modules/auth/services/core/activation.service';
 import {
   CustomerRegistrationDto,
   CustomerStatus,
@@ -37,6 +42,7 @@ import {
 } from './bulk-data-serializers';
 import { MsisdnValidationResult, nowIso } from './bulk-data.types';
 import { BulkDataApnProviderService } from './bulk-data-apn-provider.service';
+import { BulkDataProvisioningService } from './bulk-data-provisioning.service';
 
 @Injectable()
 export class BulkDataCustomersService {
@@ -45,6 +51,10 @@ export class BulkDataCustomersService {
     private readonly apnProvider: BulkDataApnProviderService,
     private readonly customers: BulkCustomersRepository,
     private readonly secondaryNumbers: BulkSecondaryNumbersRepository,
+    private readonly usersService: UserService,
+    private readonly activationService: ActivationService,
+    private readonly websocketGateway: WebsocketGateway,
+    private readonly provisioningService: BulkDataProvisioningService,
   ) {}
 
   async listCustomers(query: ListQueryDto) {
@@ -55,6 +65,7 @@ export class BulkDataCustomersService {
           [
             customer.businessName,
             customer.registrationNumber,
+            customer.tin,
             customer.businessEmail,
             customer.email,
             customer.apnId,
@@ -81,9 +92,11 @@ export class BulkDataCustomersService {
   ) {
     this.access.assertPrivileged(actor, [UserRole.SUPER_ADMIN, UserRole.ADMIN]);
     await this.access.ensureSeedData();
-    const existing = await this.customers.findByRegistrationNumber(
-      dto.registrationNumber,
-    );
+    const registrationNumber = this.resolveRegistrationNumber(dto);
+    const tin = this.normalizeOptional(dto.tin);
+    const primaryMsisdn = this.normalizeOptional(dto.primaryMsisdn);
+    const existing =
+      await this.customers.findByRegistrationNumber(registrationNumber);
 
     if (existing) {
       throw new ConflictException(
@@ -91,21 +104,20 @@ export class BulkDataCustomersService {
       );
     }
 
-    const validation = await this.apnProvider.validateMsisdnForCustomer(
-      dto.primaryMsisdn,
-      dto.apnId,
-      'addSubscriber',
-    );
+    if (tin) {
+      const existingTin = await this.customers.findByTin(tin);
 
-    if (!validation.accepted) {
-      throw new UnprocessableEntityException(validation.reason);
+      if (existingTin) {
+        throw new ConflictException('Customer TIN already exists');
+      }
     }
 
-    const customer = await this.customers.save(
+    let customer = await this.customers.save(
       this.customers.create({
         id: slugId('cus', dto.businessName),
         businessName: dto.businessName,
-        registrationNumber: dto.registrationNumber,
+        registrationNumber,
+        tin,
         businessEmail: dto.businessEmail,
         businessPhone: dto.businessPhone,
         contactPerson: dto.contactPerson,
@@ -113,24 +125,74 @@ export class BulkDataCustomersService {
         phone: dto.contactPhone,
         apnName: dto.apnName,
         apnId: dto.apnId,
-        primaryMsisdns: [dto.primaryMsisdn],
+        primaryMsisdns: [],
         status: CustomerStatus.PENDING,
       }),
     );
-    await this.access.createZeroBalance(dto.primaryMsisdn);
+    let validation: MsisdnValidationResult | undefined;
+
+    if (primaryMsisdn) {
+      const primaryAttachment = await this.verifyAndAttachPrimaryMsisdn(
+        actor,
+        customer,
+        primaryMsisdn,
+      );
+      customer = primaryAttachment.customer;
+      validation = primaryAttachment.validation;
+    }
+
+    const portalUser = await this.usersService.createOrUpdateCustomerPortalUser(
+      {
+        businessName: customer.businessName,
+        contactPerson: customer.contactPerson,
+        email: customer.email,
+        phoneNumber: customer.phone,
+        createdBy: actor.id,
+      },
+    );
+    const activation = await this.activationService.createActivationChallenge(
+      portalUser.id,
+    );
     await this.access.audit(
       'customer',
       'Customer registered',
-      customer.businessName,
+      this.auditActor(actor, customer),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'customer',
+      action: 'created',
+      entityId: customer.id,
+      customerId: customer.id,
+      status: customer.status,
+      message: 'Customer registered',
+    });
+
+    if (validation?.accepted) {
+      this.websocketGateway.emitDomainEvent({
+        entity: 'primary_msisdn',
+        action: 'created',
+        customerId: customer.id,
+        status: 'active',
+        message: 'Primary number attached',
+      });
+    }
 
     return ok(
       {
         customer: serializeCustomer(customer),
-        validation,
+        ...(validation ? { validation } : {}),
+        portalUserId: portalUser.id,
+        activation: {
+          activationToken: activation.token,
+          activationUrl: activation.activationUrl,
+          expiresAt: activation.expiresAt.toISOString(),
+          deliveryChannels: ['contact_email', 'contact_phone'],
+        },
       },
-      'Customer registered successfully',
+      validation && !validation.accepted
+        ? `Customer registered. Primary MSISDN was not attached: ${validation.reason}`
+        : 'Customer registered successfully',
     );
   }
 
@@ -147,8 +209,38 @@ export class BulkDataCustomersService {
   ) {
     this.access.assertPrivileged(actor, [UserRole.SUPER_ADMIN, UserRole.ADMIN]);
     const customer = await this.access.requireCustomer(customerId);
+    const previousEmail = customer.email;
+    const nextApnId = dto.apnId ?? customer.apnId;
+    const tinWasProvided = Object.prototype.hasOwnProperty.call(dto, 'tin');
+    const nextTin = tinWasProvided
+      ? this.normalizeNullable(dto.tin)
+      : customer.tin;
+
+    if (nextTin && nextTin.toLowerCase() !== customer.tin?.toLowerCase()) {
+      const existingTin = await this.customers.findByTin(nextTin);
+
+      if (existingTin && existingTin.id !== customer.id) {
+        throw new ConflictException('Customer TIN already exists');
+      }
+    }
+
+    if (nextApnId !== customer.apnId) {
+      for (const primaryMsisdn of customer.primaryMsisdns) {
+        const validation = await this.apnProvider.validateMsisdnForCustomer(
+          primaryMsisdn,
+          nextApnId,
+          'addSubscriber',
+        );
+
+        if (!validation.accepted) {
+          throw new UnprocessableEntityException(validation.reason);
+        }
+      }
+    }
+
     Object.assign(customer, {
       businessName: dto.businessName ?? customer.businessName,
+      tin: nextTin,
       businessEmail: dto.businessEmail ?? customer.businessEmail,
       businessPhone: dto.businessPhone ?? customer.businessPhone,
       contactPerson: dto.contactPerson ?? customer.contactPerson,
@@ -158,12 +250,28 @@ export class BulkDataCustomersService {
       apnId: dto.apnId ?? customer.apnId,
     });
     const saved = await this.customers.save(customer);
+    await this.usersService.createOrUpdateCustomerPortalUser({
+      businessName: saved.businessName,
+      contactPerson: saved.contactPerson,
+      email: saved.email,
+      phoneNumber: saved.phone,
+      createdBy: actor.id,
+    });
+    await this.deactivatePreviousPortalUser(previousEmail, saved.email);
     await this.access.audit(
       'customer',
       'Customer details updated',
-      saved.businessName,
+      this.auditActor(actor, saved),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'customer',
+      action: 'updated',
+      entityId: saved.id,
+      customerId: saved.id,
+      status: saved.status,
+      message: 'Customer details updated',
+    });
     return ok(serializeCustomer(saved), 'Customer updated successfully');
   }
 
@@ -178,14 +286,23 @@ export class BulkDataCustomersService {
     customer.deactivationReason =
       dto.status === CustomerStatus.DEACTIVATED ? dto.reason : undefined;
     const saved = await this.customers.save(customer);
+    await this.syncPortalUserStatus(saved);
     await this.access.audit(
       'customer',
       dto.status === CustomerStatus.ACTIVE
         ? 'Customer reactivated'
         : 'Customer deactivated',
-      saved.businessName,
+      this.auditActor(actor, saved),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'customer',
+      action: 'status_changed',
+      entityId: saved.id,
+      customerId: saved.id,
+      status: saved.status,
+      message: 'Customer status updated',
+    });
     return ok(serializeCustomer(saved), 'Customer status updated successfully');
   }
 
@@ -194,14 +311,16 @@ export class BulkDataCustomersService {
     customerId: string,
     dto: PrimaryMsisdnDto,
   ) {
-    this.access.assertPrivileged(actor, [UserRole.SUPER_ADMIN, UserRole.ADMIN]);
     const customer = await this.access.requireCustomer(customerId);
+    this.access.assertCanAccessCustomer(actor, customer);
 
     if (customer.primaryMsisdns.includes(dto.primaryMsisdn)) {
       throw new ConflictException(
         'Primary MSISDN is already registered to this customer',
       );
     }
+
+    await this.ensureMsisdnIsAvailableAsPrimary(dto.primaryMsisdn);
 
     const validation = await this.apnProvider.validateMsisdnForCustomer(
       dto.primaryMsisdn,
@@ -219,9 +338,16 @@ export class BulkDataCustomersService {
     await this.access.audit(
       'customer',
       'Primary MSISDN added',
-      saved.businessName,
+      this.auditActor(actor, saved),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'primary_msisdn',
+      action: 'created',
+      customerId: saved.id,
+      status: 'active',
+      message: 'Primary number added',
+    });
 
     return ok(
       {
@@ -282,6 +408,7 @@ export class BulkDataCustomersService {
     const customer = await this.access.requireCustomer(customerId);
     this.access.assertCanAccessCustomer(actor, customer);
     this.access.assertPrimaryBelongsToCustomer(customer, primaryMsisdn);
+    await this.ensureMsisdnIsNotPrimary(dto.msisdn);
     const existing = await this.secondaryNumbers.findActiveByMsisdn(dto.msisdn);
     const validation = await this.getSecondaryValidation(
       customer,
@@ -310,9 +437,17 @@ export class BulkDataCustomersService {
     await this.access.audit(
       'customer',
       'Secondary MSISDN added',
-      customer.businessName,
+      this.auditActor(actor, customer),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'secondary_msisdn',
+      action: 'created',
+      entityId: secondaryNumber.id,
+      customerId: customer.id,
+      status: secondaryNumber.status,
+      message: 'Secondary number added',
+    });
 
     return ok(
       {
@@ -336,6 +471,19 @@ export class BulkDataCustomersService {
     const rejected: MsisdnValidationResult[] = [];
 
     for (const msisdn of dto.msisdns) {
+      const primaryOwner = await this.findPrimaryOwner(msisdn);
+
+      if (primaryOwner) {
+        rejected.push({
+          msisdn,
+          accepted: false,
+          reason: 'MSISDN is already registered as a primary number',
+          apnIds: [primaryOwner.apnId],
+          registeredApnId: primaryOwner.apnId,
+        });
+        continue;
+      }
+
       const existing = await this.secondaryNumbers.findActiveByMsisdn(msisdn);
       const validation = await this.getSecondaryValidation(
         customer,
@@ -370,9 +518,19 @@ export class BulkDataCustomersService {
     await this.access.audit(
       'customer',
       'Bulk secondary MSISDN upload processed',
-      customer.businessName,
+      this.auditActor(actor, customer),
       rejected.length > 0 ? 'warning' : 'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'secondary_msisdn',
+      action: 'created',
+      customerId: customer.id,
+      message: 'Bulk secondary number upload processed',
+      metadata: {
+        added: added.length,
+        rejected: rejected.length,
+      },
+    });
 
     return ok({ added, rejected }, 'Bulk secondary MSISDN upload processed');
   }
@@ -396,6 +554,21 @@ export class BulkDataCustomersService {
       throw new NotFoundException('Secondary MSISDN not found');
     }
 
+    try {
+      await this.provisioningService.removeSecondaryGroupMember(
+        actor,
+        secondaryNumber.msisdn,
+      );
+    } catch (error) {
+      await this.access.audit(
+        'integration',
+        'Secondary MSISDN group removal failed',
+        this.auditActor(actor, customer),
+        'failed',
+      );
+      throw error;
+    }
+
     secondaryNumber.status = 'removed';
     const saved = await this.secondaryNumbers.save(secondaryNumber);
     customer.secondaryCount = Math.max(customer.secondaryCount - 1, 0);
@@ -403,9 +576,17 @@ export class BulkDataCustomersService {
     await this.access.audit(
       'customer',
       'Secondary MSISDN removed',
-      customer.businessName,
+      this.auditActor(actor, customer),
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'secondary_msisdn',
+      action: 'removed',
+      entityId: saved.id,
+      customerId: customer.id,
+      status: saved.status,
+      message: 'Secondary number removed',
+    });
     return ok(
       serializeSecondary(saved),
       'Secondary MSISDN removed successfully',
@@ -481,5 +662,168 @@ export class BulkDataCustomersService {
           customer.apnId,
           action,
         );
+  }
+
+  private async verifyAndAttachPrimaryMsisdn(
+    actor: AuthenticatedUser,
+    customer: BulkCustomerEntity,
+    primaryMsisdn: string,
+  ): Promise<{
+    customer: BulkCustomerEntity;
+    validation: MsisdnValidationResult;
+  }> {
+    const primaryOwner = await this.findPrimaryOwner(primaryMsisdn);
+
+    if (primaryOwner) {
+      return {
+        customer,
+        validation: this.rejectedPrimaryValidation(
+          primaryMsisdn,
+          'MSISDN is already registered as a primary number',
+          primaryOwner.apnId,
+        ),
+      };
+    }
+
+    const secondaryOwner =
+      await this.secondaryNumbers.findActiveByMsisdn(primaryMsisdn);
+
+    if (secondaryOwner) {
+      return {
+        customer,
+        validation: this.rejectedPrimaryValidation(
+          primaryMsisdn,
+          'MSISDN is already registered as a secondary number',
+          secondaryOwner.apnId,
+        ),
+      };
+    }
+
+    const validation = await this.apnProvider.validateMsisdnForCustomer(
+      primaryMsisdn,
+      customer.apnId,
+      'addSubscriber',
+    );
+
+    if (!validation.accepted) {
+      return { customer, validation };
+    }
+
+    customer.primaryMsisdns = [...customer.primaryMsisdns, primaryMsisdn];
+    const saved = await this.customers.save(customer);
+    await this.access.createZeroBalance(primaryMsisdn);
+    await this.access.audit(
+      'customer',
+      'Primary MSISDN verified and added',
+      this.auditActor(actor, saved),
+      'success',
+    );
+
+    return { customer: saved, validation };
+  }
+
+  private rejectedPrimaryValidation(
+    msisdn: string,
+    reason: string,
+    registeredApnId: string,
+  ): MsisdnValidationResult {
+    return {
+      msisdn,
+      accepted: false,
+      reason,
+      apnIds: [registeredApnId],
+      registeredApnId,
+      provisioningAction: 'addSubscriber',
+    };
+  }
+
+  private resolveRegistrationNumber(dto: CustomerRegistrationDto): string {
+    const providedReference =
+      this.normalizeOptional(dto.registrationNumber) ??
+      this.normalizeOptional(dto.tin);
+
+    return (
+      providedReference ?? `CUST-${randomUUID().slice(0, 8).toUpperCase()}`
+    );
+  }
+
+  private normalizeOptional(value?: string): string | undefined {
+    const trimmed = value?.trim();
+
+    return trimmed || undefined;
+  }
+
+  private normalizeNullable(value?: string): string | null {
+    const trimmed = value?.trim();
+
+    return trimmed || null;
+  }
+
+  private async ensureMsisdnIsAvailableAsPrimary(msisdn: string) {
+    await this.ensureMsisdnIsNotPrimary(msisdn);
+
+    const secondaryOwner =
+      await this.secondaryNumbers.findActiveByMsisdn(msisdn);
+    if (secondaryOwner) {
+      throw new ConflictException(
+        'MSISDN is already registered as a secondary number',
+      );
+    }
+  }
+
+  private async ensureMsisdnIsNotPrimary(msisdn: string) {
+    const primaryOwner = await this.findPrimaryOwner(msisdn);
+
+    if (primaryOwner) {
+      throw new ConflictException(
+        'MSISDN is already registered as a primary number',
+      );
+    }
+  }
+
+  private async findPrimaryOwner(msisdn: string) {
+    const customers = await this.customers.findCreatedDesc();
+
+    return (
+      customers.find((customer) => customer.primaryMsisdns.includes(msisdn)) ??
+      null
+    );
+  }
+
+  private auditActor(actor: AuthenticatedUser, customer: BulkCustomerEntity) {
+    const roles = actor.roles?.join(',') || 'unknown';
+    return `${actor.email} [${roles}] -> ${customer.businessName}`;
+  }
+
+  private async syncPortalUserStatus(customer: BulkCustomerEntity) {
+    const user = await this.usersService.findByEmail(customer.email);
+
+    if (!user?.roles.includes(UserRole.CUSTOMER)) {
+      return;
+    }
+
+    await this.usersService.changeStatus(
+      user.id,
+      customer.status === CustomerStatus.ACTIVE
+        ? UserStatus.ACTIVE
+        : UserStatus.INACTIVE,
+    );
+  }
+
+  private async deactivatePreviousPortalUser(
+    previousEmail: string,
+    nextEmail: string,
+  ) {
+    if (previousEmail.trim().toLowerCase() === nextEmail.trim().toLowerCase()) {
+      return;
+    }
+
+    const user = await this.usersService.findByEmail(previousEmail);
+
+    if (!user?.roles.includes(UserRole.CUSTOMER)) {
+      return;
+    }
+
+    await this.usersService.changeStatus(user.id, UserStatus.INACTIVE);
   }
 }

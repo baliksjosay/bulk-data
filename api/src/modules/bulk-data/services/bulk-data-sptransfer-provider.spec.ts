@@ -25,8 +25,7 @@ describe('bulk data MoMo SP transfer helpers', () => {
   });
 
   it('builds the ECW SP transfer payload for mobile money', () => {
-    process.env.PAYMENT_MOMO_SPTRANSFER_URL =
-      'http://ecw.local/api/sptransfer/';
+    process.env.PAYMENT_MOMO_ECW_URL = 'http://ecw.local/api';
     process.env.PAYMENT_MOMO_SPTRANSFER_TO_FRI = 'homeint.mtn/USER';
 
     const details = buildMomoSpTransferRequestDetails(
@@ -62,21 +61,15 @@ describe('bulk data MoMo SP transfer helpers', () => {
     ).toThrow(ServiceUnavailableException);
   });
 
-  it('adds Basic auth for mobile money SP transfer credentials', () => {
-    process.env.PAYMENT_MOMO_SPTRANSFER_USERNAME = 'test-user';
-    process.env.PAYMENT_MOMO_SPTRANSFER_PASSWORD = 'test-password';
-
+  it('does not add auth headers for ECW SP transfer', () => {
     expect(
       buildMomoSpTransferHeaders({
+        Accept: 'application/json',
         'Content-Type': 'application/json',
-        'x-api-key': 'provider-key',
       }),
     ).toEqual({
+      Accept: 'application/json',
       'Content-Type': 'application/json',
-      'x-api-key': 'provider-key',
-      Authorization: `Basic ${Buffer.from('test-user:test-password').toString(
-        'base64',
-      )}`,
     });
   });
 });

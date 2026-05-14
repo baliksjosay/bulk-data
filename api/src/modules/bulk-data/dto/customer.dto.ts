@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
@@ -16,10 +17,30 @@ export class CustomerRegistrationDto {
   @MaxLength(160)
   businessName: string;
 
-  @ApiProperty({ example: '1000172796' })
+  @ApiPropertyOptional({
+    example: '1000172796',
+    description:
+      'Optional legacy customer registration reference. If omitted, the system generates an account reference.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined,
+  )
   @IsString()
   @MaxLength(80)
-  registrationNumber: string;
+  registrationNumber?: string;
+
+  @ApiPropertyOptional({
+    example: '1000172796',
+    description: 'Optional customer TIN.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined,
+  )
+  @IsString()
+  @MaxLength(40)
+  tin?: string;
 
   @ApiProperty({ example: 'accounts@wavenet.ug' })
   @IsEmail()
@@ -52,9 +73,17 @@ export class CustomerRegistrationDto {
   @MaxLength(80)
   apnId: string;
 
-  @ApiProperty({ example: '+256772990001' })
+  @ApiPropertyOptional({
+    example: '+256772990001',
+    description:
+      'Optional primary MSISDN. When supplied, it is verified against the customer APN before being attached.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined,
+  )
   @Matches(UGANDA_MTN_E164_PATTERN)
-  primaryMsisdn: string;
+  primaryMsisdn?: string;
 }
 
 export class CustomerUpdateDto {
@@ -63,6 +92,16 @@ export class CustomerUpdateDto {
   @IsString()
   @MaxLength(160)
   businessName?: string;
+
+  @ApiPropertyOptional({
+    example: '1000172796',
+    description: 'Optional customer TIN. Submit an empty value to clear it.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(40)
+  tin?: string;
 
   @ApiPropertyOptional({ example: 'accounts@wavenet.ug' })
   @IsOptional()

@@ -45,7 +45,6 @@ describe('BulkDataPrnProviderService', () => {
     const adapter = createAdapter({
       'payments.prnProvider.initUrl':
         'http://10.156.42.7:9040/api/payment/reference',
-      'payments.prnProvider.apiKey': 'prn-key',
       'payments.prnProvider.timeoutMs': 60000,
     });
 
@@ -68,8 +67,8 @@ describe('BulkDataPrnProviderService', () => {
       expect.objectContaining({
         method: 'POST',
         headers: {
+          Accept: 'application/json',
           'Content-Type': 'application/json',
-          'x-api-key': 'prn-key',
         },
         body: JSON.stringify({
           customerMsisdn: '256779999707',

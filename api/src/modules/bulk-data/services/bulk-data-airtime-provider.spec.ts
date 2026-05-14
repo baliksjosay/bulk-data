@@ -36,7 +36,7 @@ describe('bulk data airtime provider helpers', () => {
     expect(request).toMatchObject({
       originTransactionID: '20260513001',
       subscriberNumber: '256779999707',
-      adjustmentAmountRelative: '-200000',
+      adjustmentAmountRelative: '200000',
     });
     expect(request.originTimeStamp).toMatch(/^\d{8}T\d{2}:\d{2}:\d{2}\+0300$/);
   });

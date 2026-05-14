@@ -18,8 +18,7 @@ export class UpdateSubscriptionDto {
   )
   @IsString()
   @Matches(PROVISIONING_UGANDA_MSISDN_PATTERN, {
-    message:
-      'primaryMsisdn must be a Uganda MTN MSISDN in 256XXXXXXXXX format',
+    message: 'primaryMsisdn must be a Uganda MTN MSISDN in 256XXXXXXXXX format',
   })
   primaryMsisdn: string;
 

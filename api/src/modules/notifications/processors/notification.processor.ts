@@ -51,7 +51,7 @@ export class NotificationProcessor extends WorkerHost {
 
     const delivery = await this.deliveryRepo.findOne({
       where: { id: deliveryId },
-      relations: ['notification'],
+      relations: ['notification', 'recipient'],
     });
 
     if (!delivery) {

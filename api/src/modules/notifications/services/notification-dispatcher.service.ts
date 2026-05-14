@@ -39,7 +39,19 @@ export class NotificationDispatcherService {
       const enabledChannels = await this.preferenceService.getEnabledChannels(
         recipient.userId,
         notification.type,
-        notification['channels'] ?? [],
+        notification.channels ?? [],
+        {
+          priority: notification.priority,
+          data: notification.data,
+        },
+      );
+      const deliveryDelayMs = await this.preferenceService.getDeliveryDelayMs(
+        recipient.userId,
+        notification.scheduledAt ?? new Date(),
+        {
+          priority: notification.priority,
+          data: notification.data,
+        },
       );
 
       for (const channel of enabledChannels) {
@@ -59,9 +71,7 @@ export class NotificationDispatcherService {
             priority: this.mapPriority(notification.priority),
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 },
-            delay: notification.scheduledAt
-              ? Math.max(0, notification.scheduledAt.getTime() - Date.now())
-              : 0,
+            delay: deliveryDelayMs,
           },
         );
       }

@@ -13,11 +13,16 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import Redis from 'ioredis';
-import { Interval } from '@nestjs/schedule';
 import { RedisService } from '../../redis/redis.service';
 import { HealthCheckService } from '../../health/health-check.service';
+import { RealtimeDomainEvent } from '../interfaces/realtime-event.interface';
 
-type PaymentStatus = 'awaiting_payment' | 'processing' | 'confirmed' | 'failed' | 'expired';
+type PaymentStatus =
+  | 'awaiting_payment'
+  | 'processing'
+  | 'confirmed'
+  | 'failed'
+  | 'expired';
 
 type PaymentStatusPayload = {
   sessionId: string;
@@ -31,12 +36,30 @@ type PaymentStatusPayload = {
   socketRoom?: string;
 };
 
+const LIVE_ACCESS_TOKEN_COOKIE = 'mtn_bds_live_access_token';
+
+function splitOrigins(value?: string): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function buildWebsocketCorsOrigins(): string[] {
+  return Array.from(
+    new Set([
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      process.env.FRONTEND_URL ?? '',
+      ...splitOrigins(process.env.ALLOWED_ORIGINS),
+    ]),
+  ).filter(Boolean);
+}
+
 @WebSocketGateway({
   cors: {
-    origin: [
-      'http://localhost:5173',
-      process.env.FRONTEND_URL || 'http://localhost:3001',
-    ],
+    origin: buildWebsocketCorsOrigins(),
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -222,14 +245,21 @@ export class WebsocketGateway
     );
   }
 
-  @Interval(5000)
-  async broadcastSystemInfo() {
-    const system = await this.healthCheckService.getSystemInfo({
-      includeMemoryDetails: true,
-    });
-    const database = await this.healthCheckService.getDatabaseHealth();
-    system.database = database;
-    this.server.emit('system-info', system);
+  emitDomainEvent(event: RealtimeDomainEvent): void {
+    const payload = {
+      ...event,
+      occurredAt: event.occurredAt ?? new Date().toISOString(),
+    };
+
+    if (event.userId) {
+      this.server
+        .to(this.getNotificationRoom(event.userId))
+        .emit('bulk-data:event', payload);
+      return;
+    }
+
+    this.server.to(this.getRealtimeRoom()).emit('bulk-data:event', payload);
+    this.logger.debug(`Realtime ${event.entity}.${event.action} event emitted`);
   }
 
   // ==================== NOTIFICATIONS FEATURES ====================
@@ -286,20 +316,28 @@ export class WebsocketGateway
     return `notifications:${userId}`;
   }
 
+  private getRealtimeRoom(): string {
+    return 'bulk-data:authenticated';
+  }
+
   private async authenticateAndJoinNotifications(
     client: Socket,
   ): Promise<string | null> {
     try {
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.headers?.authorization?.replace('Bearer ', '');
+      const token = this.extractAuthToken(client);
 
       if (!token) {
         return null;
       }
 
       const payload = await this.jwtService.verifyAsync(token);
-      const userId = String(payload.sub);
+      const userIdValue = payload.sub ?? payload.id ?? payload.userId;
+
+      if (!userIdValue) {
+        return null;
+      }
+
+      const userId = String(userIdValue);
 
       if (!this.userSockets.has(userId)) {
         this.userSockets.set(userId, new Set());
@@ -307,12 +345,7 @@ export class WebsocketGateway
       this.userSockets.get(userId)!.add(client.id);
 
       client.join(this.getNotificationRoom(userId));
-
-      if (userId) {
-        client.join(this.getNotificationRoom(userId));
-        client.data.userId = userId;
-      }
-
+      client.join(this.getRealtimeRoom());
       client.data.userId = userId;
 
       this.logger.log(`User ${userId} authenticated for notifications`);
@@ -321,6 +354,63 @@ export class WebsocketGateway
       this.logger.error(`Authentication error: ${error?.message}`);
       return null;
     }
+  }
+
+  private extractAuthToken(client: Socket): string | null {
+    const authToken = client.handshake.auth?.token;
+
+    if (typeof authToken === 'string' && authToken.trim()) {
+      return this.stripBearer(authToken);
+    }
+
+    const authorization = client.handshake.headers?.authorization;
+    const authorizationHeader = Array.isArray(authorization)
+      ? authorization[0]
+      : authorization;
+
+    if (authorizationHeader?.trim()) {
+      return this.stripBearer(authorizationHeader);
+    }
+
+    const cookies = this.parseCookieHeader(client.handshake.headers.cookie);
+    return cookies[LIVE_ACCESS_TOKEN_COOKIE] ?? null;
+  }
+
+  private stripBearer(value: string): string {
+    return value.replace(/^Bearer\s+/i, '').trim();
+  }
+
+  private parseCookieHeader(
+    cookieHeader?: string | string[],
+  ): Record<string, string> {
+    const cookieValue = Array.isArray(cookieHeader)
+      ? cookieHeader.join(';')
+      : cookieHeader;
+
+    if (!cookieValue) {
+      return {};
+    }
+
+    return cookieValue
+      .split(';')
+      .reduce<Record<string, string>>((cookies, pair) => {
+        const [rawName, ...rawValue] = pair.split('=');
+        const name = rawName?.trim();
+
+        if (!name) {
+          return cookies;
+        }
+
+        const value = rawValue.join('=').trim();
+
+        try {
+          cookies[name] = decodeURIComponent(value);
+        } catch {
+          cookies[name] = value;
+        }
+
+        return cookies;
+      }, {});
   }
 
   @SubscribeMessage('subscribe_notifications')
@@ -337,6 +427,7 @@ export class WebsocketGateway
     }
 
     this.logger.debug(`User ${client.data.userId} subscribed to notifications`);
+    await this.emitCachedUnreadCount(client);
     return { success: true, message: 'Subscribed to notifications' };
   }
 
@@ -363,8 +454,35 @@ export class WebsocketGateway
     this.server
       .to(this.getNotificationRoom(userId))
       .emit('notification:new', notification);
+    this.emitDomainEvent({
+      entity: 'notification',
+      action: 'created',
+      entityId: String(notification?.notificationId ?? notification?.id ?? ''),
+      userId,
+      message: 'New notification received',
+    });
 
     this.logger.debug(`Sent notification to user ${userId}`);
+  }
+
+  private async emitCachedUnreadCount(client: Socket): Promise<void> {
+    const userId = client.data.userId;
+
+    if (!userId) {
+      return;
+    }
+
+    const cachedCount = await this.redis.get<number | string>(
+      `notifications:unread:${userId}`,
+    );
+    const unreadCount =
+      typeof cachedCount === 'number'
+        ? cachedCount
+        : Number.parseInt(String(cachedCount ?? '0'), 10);
+
+    client.emit('notification:unread-count', {
+      unreadCount: Number.isFinite(unreadCount) ? unreadCount : 0,
+    });
   }
 
   async sendUnreadCountUpdate(userId: string, count: number): Promise<void> {

@@ -1,5 +1,6 @@
 import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.interface';
+import { WebsocketGateway } from 'src/modules/notifications/services/notification-websocket.service';
 import { UserRole } from 'src/modules/users/enums/user-role.enum';
 import {
   ListQueryDto,
@@ -32,6 +33,7 @@ export class BulkDataServiceRequestsService {
     private readonly customersService: BulkDataCustomersService,
     private readonly serviceRequests: BulkServiceRequestsRepository,
     private readonly bundles: BulkBundlesRepository,
+    private readonly websocketGateway: WebsocketGateway,
   ) {}
 
   async submitServiceRequest(dto: ServiceRequestDto) {
@@ -53,6 +55,13 @@ export class BulkDataServiceRequestsService {
       dto.businessName,
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'service_request',
+      action: 'created',
+      entityId: serviceRequest.id,
+      status: serviceRequest.status,
+      message: 'Service request submitted',
+    });
     return ok(
       serializeServiceRequest(serviceRequest),
       'Service request submitted successfully',
@@ -120,6 +129,13 @@ export class BulkDataServiceRequestsService {
       actor.email,
       'success',
     );
+    this.websocketGateway.emitDomainEvent({
+      entity: 'service_request',
+      action: 'status_changed',
+      entityId: saved.id,
+      status: saved.status,
+      message: `Service request marked ${saved.status}`,
+    });
     return ok(
       serializeServiceRequest(saved),
       'Service request updated successfully',
@@ -146,14 +162,25 @@ export class BulkDataServiceRequestsService {
     const savedRequest = await this.serviceRequests.save(serviceRequest);
     const data = registered.data as {
       customer: Record<string, unknown>;
-      validation: MsisdnValidationResult;
+      validation?: MsisdnValidationResult;
+      activation?: Record<string, unknown>;
+      portalUserId?: string;
     };
+    this.websocketGateway.emitDomainEvent({
+      entity: 'service_request',
+      action: 'converted',
+      entityId: savedRequest.id,
+      status: savedRequest.status,
+      message: 'Service request converted',
+    });
 
     return ok(
       {
         serviceRequest: serializeServiceRequest(savedRequest),
         customer: data.customer,
         validation: data.validation,
+        activation: data.activation,
+        portalUserId: data.portalUserId,
       },
       'Service request converted successfully',
     );

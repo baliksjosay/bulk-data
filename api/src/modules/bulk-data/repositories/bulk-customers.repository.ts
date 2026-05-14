@@ -18,7 +18,12 @@ export class BulkCustomersRepository extends BulkDataTypeOrmRepository<BulkCusto
   }
 
   findByEmail(email: string) {
-    return this.findOne({ where: { email } });
+    return this.repository
+      .createQueryBuilder('customer')
+      .where('LOWER(customer.email) = LOWER(:email)', {
+        email: email.trim(),
+      })
+      .getOne();
   }
 
   findByRegistrationNumber(registrationNumber: string) {
@@ -30,6 +35,15 @@ export class BulkCustomersRepository extends BulkDataTypeOrmRepository<BulkCusto
           registrationNumber: registrationNumber.trim(),
         },
       )
+      .getOne();
+  }
+
+  findByTin(tin: string) {
+    return this.repository
+      .createQueryBuilder('customer')
+      .where('LOWER(customer.tin) = LOWER(:tin)', {
+        tin: tin.trim(),
+      })
       .getOne();
   }
 

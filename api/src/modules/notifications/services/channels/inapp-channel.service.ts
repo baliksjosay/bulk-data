@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NotificationDelivery } from '../../entities/notification-delivery.entity';
@@ -8,6 +8,7 @@ import { ChannelProvider } from '../../interfaces/channel-provider.interface';
 import { RenderedNotification } from '../../interfaces/notification-payload.interface';
 import { WebsocketChannelService } from './websocket-channel.service';
 import { NotificationChannel } from '../../enums/notification-channel.enum';
+import { WebsocketGateway } from '../notification-websocket.service';
 
 @Injectable()
 export class InAppChannelService implements ChannelProvider {
@@ -20,6 +21,8 @@ export class InAppChannelService implements ChannelProvider {
     @InjectRepository(NotificationRecipient)
     private readonly recipientRepo: Repository<NotificationRecipient>,
     private readonly wsChannel: WebsocketChannelService,
+    @Optional()
+    private readonly wsGateway?: WebsocketGateway,
   ) {}
 
   isAvailable(): boolean {
@@ -48,5 +51,24 @@ export class InAppChannelService implements ChannelProvider {
 
     // Also push over WebSocket if the user is connected
     await this.wsChannel.send(delivery, rendered);
+
+    if (this.wsGateway) {
+      await this.wsGateway.sendUnreadCountUpdate(
+        delivery.recipientUserId,
+        await this.getUnreadCount(delivery.recipientUserId),
+      );
+    }
+  }
+
+  private async getUnreadCount(userId: string): Promise<number> {
+    return this.recipientRepo
+      .createQueryBuilder('r')
+      .leftJoin('r.notification', 'n')
+      .where('r.userId = :userId', { userId })
+      .andWhere('r.readAt IS NULL')
+      .andWhere(':inAppChannel = ANY(n.channels)', {
+        inAppChannel: NotificationChannel.IN_APP,
+      })
+      .getCount();
   }
 }

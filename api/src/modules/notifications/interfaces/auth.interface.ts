@@ -1,4 +1,3 @@
-
 export interface UserInvitedEvent {
   userId: string;
   email: string;

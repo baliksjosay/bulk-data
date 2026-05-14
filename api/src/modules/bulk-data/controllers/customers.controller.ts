@@ -94,7 +94,12 @@ export class CustomersController {
   }
 
   @Post(':customerId/primary-msisdns')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @Roles(
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.SUPPORT,
+    UserRole.CUSTOMER,
+  )
   @ApiOperation({ summary: 'Add primary MSISDN' })
   addPrimaryMsisdn(
     @CurrentUser() actor: AuthenticatedUser,

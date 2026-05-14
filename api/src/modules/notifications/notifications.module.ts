@@ -24,7 +24,8 @@ import { WebsocketGateway } from './services/notification-websocket.service';
 import { NotificationsService } from './services/notifications.service';
 import { NotificationsController } from './controllers/notifications.controller';
 import { HealthModule } from '../health/health.module';
-import { LogSimulatorService } from './services/live-logs-simulation.service';
+import { UserPreference } from '../users/entities/user-preference.entity';
+import { User } from '../users/entities/user.entity';
 
 const ENTITIES = [
   Notification,
@@ -33,6 +34,8 @@ const ENTITIES = [
   NotificationTemplate,
   NotificationPreference,
   DeviceToken,
+  User,
+  UserPreference,
 ];
 
 const CHANNEL_SERVICES = [
@@ -64,7 +67,6 @@ const CHANNEL_SERVICES = [
     NotificationProcessor,
     // Event listeners
     NotificationEventsListener,
-    LogSimulatorService,
   ],
   exports: [
     NotificationsService,
@@ -74,10 +76,4 @@ const CHANNEL_SERVICES = [
     WebsocketGateway,
   ],
 })
-export class NotificationsModule {
-  constructor(private readonly simulator: LogSimulatorService) {
-    if (process.env.ENABLE_LOG_SIMULATION === 'true') {
-      this.simulator.startSimulation();
-    }
-  }
-}
+export class NotificationsModule {}

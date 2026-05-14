@@ -30,6 +30,15 @@ export class BulkDataProvisioningService {
     });
   }
 
+  removeSecondaryGroupMember(
+    actor: AuthenticatedUser,
+    secondaryMsisdn: string,
+  ) {
+    return this.provisioningService.deleteGroupMember(actor, {
+      secondaryMsisdn: normalizeProvisioningMsisdn(secondaryMsisdn),
+    });
+  }
+
   private systemActor(): AuthenticatedUser {
     return {
       id: 'bulk-data-payment-provisioning',
@@ -63,5 +72,5 @@ function formatPcrfDateTime(date: Date) {
       }
       return acc;
     }, {});
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}${parts.second}`;
 }

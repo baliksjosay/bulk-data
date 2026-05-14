@@ -75,14 +75,7 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
     payload: AddSubscriberDto,
     requestId: string,
   ): Promise<ProvisioningProviderResult> {
-    return this.post(
-      'subscriber',
-      {
-        ...payload,
-        usrStation: 3,
-      },
-      requestId,
-    );
+    return this.post('subscriber', { ...payload }, requestId);
   }
 
   subscribeService(
@@ -236,14 +229,6 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
   }
 
   private getEndpointTargetUrl(endpoint: PcrfEndpointKey): string {
-    const explicitUrl = this.configService
-      .get<string>(`provisioning.pcrf.urls.${endpoint}`)
-      ?.trim();
-
-    if (explicitUrl) {
-      return explicitUrl;
-    }
-
     const baseUrl = this.configService.get<string>('provisioning.pcrf.baseUrl');
 
     if (!baseUrl) {
@@ -267,18 +252,6 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
       'Content-Type': 'application/json',
       'x-request-id': requestId,
     };
-    const bearerToken = this.configService.get<string>(
-      'provisioning.pcrf.bearerToken',
-    );
-    const apiKey = this.configService.get<string>('provisioning.pcrf.apiKey');
-
-    if (bearerToken) {
-      headers.Authorization = `Bearer ${bearerToken}`;
-    }
-
-    if (apiKey) {
-      headers['x-api-key'] = apiKey;
-    }
 
     return headers;
   }

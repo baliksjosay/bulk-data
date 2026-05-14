@@ -14,19 +14,23 @@ export class SubscribeServiceDto {
   serviceCode: string;
 
   @ApiProperty({
-    example: '2026-05-22T13:12:14',
-    description: 'PCRF timestamp in yyyy-MM-ddTHH:mm:ss format.',
+    example: '20260522131214',
+    description: 'PCRF timestamp in yyyyMMddHHmmss format.',
   })
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
+  @Matches(/^\d{14}$/, {
+    message: 'startDateTime must be in yyyyMMddHHmmss format',
+  })
   startDateTime: string;
 
   @ApiProperty({
-    example: '2026-06-22T13:12:14',
-    description: 'PCRF timestamp in yyyy-MM-ddTHH:mm:ss format.',
+    example: '20260622131214',
+    description: 'PCRF timestamp in yyyyMMddHHmmss format.',
   })
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
+  @Matches(/^\d{14}$/, {
+    message: 'endDateTime must be in yyyyMMddHHmmss format',
+  })
   endDateTime: string;
 
   @ApiProperty({ example: '23556778134' })

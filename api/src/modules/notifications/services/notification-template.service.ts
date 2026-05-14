@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NotificationTemplate } from '../entities/notification-template.entity';
@@ -23,23 +19,33 @@ export class NotificationTemplateService {
     type: NotificationType,
     channel: NotificationChannel,
   ): Promise<NotificationTemplate | null> {
-    return this.templateRepo.findOne({ where: { type, channel, isActive: true } });
+    return this.templateRepo.findOne({
+      where: { type, channel, isActive: true },
+    });
   }
 
   async render(
     templateId: string,
     variables: Record<string, string> = {},
   ): Promise<RenderedNotification> {
-    const template = await this.templateRepo.findOne({ where: { id: templateId } });
-    if (!template) throw new NotFoundException(`Template ${templateId} not found`);
+    const template = await this.templateRepo.findOne({
+      where: { id: templateId },
+    });
+    if (!template)
+      throw new NotFoundException(`Template ${templateId} not found`);
 
     const interpolate = (str: string) =>
-      str.replace(/\{\{(\w+)\}\}/g, (_, key: string) => variables[key] ?? `{{${key}}}`);
+      str.replace(
+        /\{\{(\w+)\}\}/g,
+        (_, key: string) => variables[key] ?? `{{${key}}}`,
+      );
 
     return {
       subject: template.subject ? interpolate(template.subject) : undefined,
       body: interpolate(template.bodyTemplate),
-      htmlBody: template.htmlTemplate ? interpolate(template.htmlTemplate) : undefined,
+      htmlBody: template.htmlTemplate
+        ? interpolate(template.htmlTemplate)
+        : undefined,
     };
   }
 
