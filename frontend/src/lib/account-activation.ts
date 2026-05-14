@@ -14,6 +14,14 @@ import type {
 } from "@/types/domain";
 
 export function startAccountActivationOtp(token: string): AccountActivationOtpResult | null {
+  return startAccountActivationOtpForDestination(token, undefined, "email");
+}
+
+export function startAccountActivationOtpForDestination(
+  token: string,
+  identifier: string | undefined,
+  deliveryChannel: "email" | "sms",
+): AccountActivationOtpResult | null {
   const record = getAccountActivationRecord(token);
 
   if (!record) {
@@ -26,7 +34,14 @@ export function startAccountActivationOtp(token: string): AccountActivationOtpRe
     return null;
   }
 
-  return createAccountActivationOtp(token, customer.email);
+  const destination =
+    deliveryChannel === "sms" ? customer.phone : customer.email;
+
+  if (identifier && identifier.trim().toLowerCase() !== destination.toLowerCase()) {
+    return null;
+  }
+
+  return createAccountActivationOtp(token, destination, deliveryChannel);
 }
 
 export function completeAccountActivationOtp(

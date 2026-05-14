@@ -33,12 +33,8 @@ import type {
   Overview,
   OverviewQuery,
   PaginatedList,
-  ProvisioningAddGroupMembersBulkRequest,
-  ProvisioningAddSubscriberRequest,
-  ProvisioningCommandResult,
-  ProvisioningDeleteGroupMemberRequest,
-  ProvisioningGroupMemberPair,
-  ProvisioningUpdateSubscriptionRequest,
+  PasswordPolicy,
+  PasswordPolicyUpdate,
   PrimaryMsisdnRequest,
   PurchaseConfirmationRequest,
   PurchaseConfirmationResult,
@@ -58,13 +54,18 @@ import type {
   ServiceRequestRequest,
   ServiceRequestUpdateRequest,
   StaffUserCreateRequest,
+  StaffUserListQuery,
+  SocialLoginRequest,
   TotpAuthenticatorApp,
   TotpEnrollment,
   TotpEnrollmentRequest,
   TotpVerificationRequest,
   TotpVerificationResult,
   UserAccount,
+  UserAccountUpdateRequest,
+  UserLockRequest,
   UserPreferences,
+  UserStatusUpdateRequest,
   WebAuthnAuthenticationOptions,
   WebAuthnDevice,
   WebAuthnRegistrationOptions,
@@ -74,16 +75,69 @@ import type {
 export class ApiClientError extends Error {
   readonly status: number;
   readonly errors: ApiValidationIssue[];
+  readonly retryAfterSeconds?: number;
 
   constructor(
     message: string,
     status: number,
     errors: ApiValidationIssue[] = [],
+    retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.errors = errors;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export function isApiClientError(error: unknown): error is ApiClientError {
+  return error instanceof ApiClientError;
+}
+
+export function isRateLimitError(error: unknown): error is ApiClientError {
+  return isApiClientError(error) && error.status === 429;
+}
+
+export function formatRetryAfter(seconds?: number) {
+  if (!seconds || seconds <= 0) {
+    return "later";
+  }
+
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+
+  const minutes = Math.ceil(seconds / 60);
+
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+const authSessionStorageKey = "mtn-bds-auth-session";
+const authSessionChangeEvent = "mtn-bds-auth-session-change";
+
+function isLiveApiMode() {
+  return process.env.NEXT_PUBLIC_API_MODE === "live";
+}
+
+function isAuthEndpoint(path: string) {
+  return /^\/api\/(?:live\/)?auth(?:\/|$)/.test(path);
+}
+
+function handleUnauthorizedLiveRequest(path: string) {
+  if (
+    typeof window === "undefined" ||
+    !isLiveApiMode() ||
+    isAuthEndpoint(path)
+  ) {
+    return;
+  }
+
+  window.localStorage.removeItem(authSessionStorageKey);
+  window.dispatchEvent(new Event(authSessionChangeEvent));
+
+  if (!window.location.pathname.startsWith("/auth")) {
+    window.location.assign("/auth/login");
   }
 }
 
@@ -112,10 +166,16 @@ async function requestEnvelope<T>(
   const envelope = await readApiEnvelope<T>(response);
 
   if (!response.ok || !envelope.success) {
+    const retryAfterSeconds = parseRetryAfterHeader(response.headers);
+    if (response.status === 401) {
+      handleUnauthorizedLiveRequest(path);
+    }
+
     throw new ApiClientError(
       envelope.message || "Request failed",
       response.status,
       envelope.success ? [] : (envelope.errors ?? []),
+      retryAfterSeconds,
     );
   }
 
@@ -171,6 +231,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parseRetryAfterHeader(headers: Headers) {
+  const value = headers.get("retry-after");
+
+  if (!value) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, Math.ceil(seconds));
+  }
+
+  const retryAt = Date.parse(value);
+
+  if (Number.isNaN(retryAt)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+}
+
 async function requestPaginated<T>(
   path: string,
   init?: RequestInit,
@@ -192,6 +274,10 @@ async function requestPaginated<T>(
 
 function resolveApiPath(path: string) {
   const apiMode = process.env.NEXT_PUBLIC_API_MODE === "live" ? "live" : "fake";
+
+  if (path === "/api/auth/session") {
+    return path;
+  }
 
   if (apiMode === "fake") {
     return path;
@@ -238,6 +324,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  loginWithGoogleIdToken: (payload: SocialLoginRequest) =>
+    request<AuthLoginResponse>("/api/auth/login/google", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "GOOGLE",
+        idToken: payload.idToken,
+        deviceId: payload.deviceId,
+      }),
+    }),
+  loginWithMicrosoftIdToken: (payload: SocialLoginRequest) =>
+    request<AuthLoginResponse>("/api/auth/login/microsoft", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "MICROSOFT",
+        idToken: payload.idToken,
+        deviceId: payload.deviceId,
+      }),
+    }),
   completeMfaLogin: (payload: {
     challengeToken: string;
     challengeId: string;
@@ -262,6 +366,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  staffUsers: (query: StaffUserListQuery = {}) =>
+    requestPaginated<UserAccount>(withQuery("/api/users/staff", query)),
+  updateUser: (userId: string, payload: UserAccountUpdateRequest) =>
+    request<UserAccount>(`/api/users/${pathSegment(userId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  changeUserStatus: (userId: string, payload: UserStatusUpdateRequest) =>
+    request<UserAccount>(`/api/users/${pathSegment(userId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  setUserRoles: (userId: string, roles: UserAccount["roles"]) =>
+    request<UserAccount>(`/api/users/${pathSegment(userId)}/roles`, {
+      method: "PATCH",
+      body: JSON.stringify({ roles }),
+    }),
+  lockUser: (userId: string, payload: UserLockRequest = {}) =>
+    request<UserAccount>(`/api/users/${pathSegment(userId)}/lock`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  unlockUser: (userId: string) =>
+    request<UserAccount>(`/api/users/${pathSegment(userId)}/unlock`, {
+      method: "POST",
+    }),
   startAccountActivationOtp: (payload: AccountActivationOtpRequest) =>
     request<AccountActivationOtpResult>("/api/auth/activation/otp", {
       method: "POST",
@@ -284,55 +414,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  provisioningAddGroupMember: (payload: ProvisioningGroupMemberPair) =>
-    request<ProvisioningCommandResult<ProvisioningGroupMemberPair>>(
-      "/api/provisioning/group-member",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
-  provisioningAddGroupMembersBulk: (
-    payload: ProvisioningAddGroupMembersBulkRequest,
-  ) =>
-    request<ProvisioningCommandResult<ProvisioningAddGroupMembersBulkRequest>>(
-      "/api/provisioning/group-members/bulk",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
-  provisioningDeleteGroupMember: (
-    payload: ProvisioningDeleteGroupMemberRequest,
-  ) =>
-    request<ProvisioningCommandResult<ProvisioningDeleteGroupMemberRequest>>(
-      "/api/provisioning/group-member/delete",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
-  provisioningUpdateSubscription: (
-    payload: ProvisioningUpdateSubscriptionRequest,
-  ) =>
-    request<ProvisioningCommandResult<ProvisioningUpdateSubscriptionRequest>>(
-      "/api/provisioning/subscriptions/update",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
-  provisioningAddSubscriber: (payload: ProvisioningAddSubscriberRequest) =>
-    request<ProvisioningCommandResult<ProvisioningAddSubscriberRequest>>(
-      "/api/provisioning/subscriber",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
   overview: (query: OverviewQuery = {}) =>
     request<Overview>(withQuery("/api/overview", query)),
   customers: () => request<Customer[]>("/api/customers"),
+  customer: (customerId: string) => request<Customer>(customerPath(customerId)),
   customerPage: (query: ListQuery) =>
     requestPaginated<Customer>(withQuery("/api/customers", query)),
   registerCustomer: (payload: CustomerRegistrationRequest) =>
@@ -582,7 +667,19 @@ export const api = {
     request<WebAuthnDevice>(`/api/security/webauthn/devices/${deviceId}`, {
       method: "DELETE",
     }),
+  logout: () =>
+    request<{ message: string }>("/api/auth/logout", {
+      method: "POST",
+    }),
+  currentAuthSession: () => request<AuthLoginResult>("/api/auth/session"),
   authSessions: () => request<AuthSession[]>("/api/security/sessions"),
+  passwordPolicy: () =>
+    request<PasswordPolicy>("/api/security/password-policy"),
+  updatePasswordPolicy: (payload: PasswordPolicyUpdate) =>
+    request<PasswordPolicy>("/api/security/password-policy", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   revokeAuthSession: (sessionId: string) =>
     request<AuthSession>(`/api/security/sessions/${pathSegment(sessionId)}`, {
       method: "DELETE",

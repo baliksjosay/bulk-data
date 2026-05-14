@@ -1,103 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import {
-  Fingerprint,
-  Mail,
-  MessageSquare,
-  ShieldCheck,
-  Smartphone,
-  UserRoundCheck,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useState } from "react";
+import { Fingerprint, Mail, ShieldCheck, Smartphone } from "lucide-react";
+import type { Route } from "next";
+import { useRouter } from "next/navigation";
 import { BrandLoader } from "@/components/ui/brand-loader";
+import { Input } from "@/components/ui/input";
 import { OtpCodeInput } from "@/features/auth/otp-code-input";
-import { api } from "@/lib/api-client";
-import { persistAuthSession } from "@/lib/auth-session";
-import {
-  isUgandaPhoneNumber,
-  normalizeUgandaPhoneInput,
-} from "@/lib/uganda-phone";
+import { PasskeySetupPrompt } from "@/features/auth/passkey-setup-prompt";
+import { ApiClientError, api } from "@/lib/api-client";
+import { clearAuthSession, persistAuthSession } from "@/lib/auth-session";
+import { beginSocialPopupLogin } from "@/lib/social-auth";
 import { authenticatePasskey, completeMfaPasskey } from "@/lib/webauthn";
 import type {
   AuthLoginResult,
-  AuthLoginMethod,
   AuthLoginResponse,
   AuthMfaChallenge,
+  SocialLoginProvider,
 } from "@/types/domain";
 
-type LoginMethod = AuthLoginMethod;
+type LoginMethod = "password" | "passkey";
 type MfaMethod = NonNullable<AuthMfaChallenge["mfaMethod"]>;
 
-type OtpIdentifierValidationResult = Readonly<{
-  normalized: string | null;
-  kind: "phone" | "email" | "tin" | null;
-  isValid: boolean;
-  message?: string;
-}>;
-
-function validateOtpIdentifier(raw: string): OtpIdentifierValidationResult {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return {
-      normalized: null,
-      kind: null,
-      isValid: false,
-      message: "Phone number, email, or TIN is required",
-    };
-  }
-
-  const normalizedPhone = normalizeUgandaPhoneInput(trimmed);
-  if (isUgandaPhoneNumber(normalizedPhone)) {
-    return {
-      normalized: normalizedPhone,
-      kind: "phone",
-      isValid: true,
-    };
-  }
-
-  const normalizedEmail = trimmed.toLowerCase();
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-    return {
-      normalized: normalizedEmail,
-      kind: "email",
-      isValid: true,
-    };
-  }
-
-  const tinDigits = trimmed.replace(/\D/g, "");
-  if (tinDigits.length === 10) {
-    return {
-      normalized: tinDigits,
-      kind: "tin",
-      isValid: true,
-    };
-  }
-
-  return {
-    normalized: null,
-    kind: null,
-    isValid: false,
-    message: "Use a valid Uganda phone number, email address, or 10-digit TIN",
-  };
-}
-
 const loginMethodStorageKey = "mtn-bds-last-login-method";
-const loginMethodChangeEvent = "mtn-bds-login-method-change";
 const liveApiEnabled = process.env.NEXT_PUBLIC_API_MODE === "live";
-const defaultLoginMethod: LoginMethod = liveApiEnabled ? "password" : "otp";
-const loginMethodOptions = [
-  { key: "otp", label: "OTP login", icon: MessageSquare },
-  { key: "password", label: "Password", icon: UserRoundCheck },
-  { key: "passkey", label: "Passkey", icon: Fingerprint },
-] as const;
+const googleSsoConfigured = Boolean(
+  process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim(),
+);
+const microsoftSsoConfigured = Boolean(
+  process.env.NEXT_PUBLIC_MICROSOFT_CLIENT_ID?.trim(),
+);
+const ssoConfigured = googleSsoConfigured || microsoftSsoConfigured;
 const mfaMethodOptions: Record<
   MfaMethod,
   {
@@ -133,17 +66,42 @@ const mfaMethodOptions: Record<
   },
 };
 
-function isLoginMethod(value: string | null): value is LoginMethod {
-  return value === "password" || value === "otp" || value === "passkey";
+function GoogleIcon() {
+  return (
+    <svg aria-hidden="true" className="h-4.5 w-4.5" viewBox="0 0 24 24">
+      <path
+        fill="#EA4335"
+        d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.3-1.9 3.1l3.1 2.4c1.8-1.7 2.8-4.1 2.8-6.9 0-.7-.1-1.4-.2-2H12Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 22c2.5 0 4.6-.8 6.1-2.3l-3.1-2.4c-.9.6-1.9 1-3 1-2.3 0-4.2-1.5-4.8-3.6H4v2.5A10 10 0 0 0 12 22Z"
+      />
+      <path
+        fill="#4A90E2"
+        d="M7.2 14.7A6 6 0 0 1 6.9 13c0-.6.1-1.2.3-1.7V8.8H4A10 10 0 0 0 2.9 13c0 1.6.4 3.1 1.1 4.5l3.2-2.8Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M12 7.7c1.3 0 2.5.5 3.4 1.4l2.6-2.6C16.6 5.2 14.5 4.3 12 4.3A10 10 0 0 0 4 8.8l3.2 2.5c.6-2.1 2.5-3.6 4.8-3.6Z"
+      />
+    </svg>
+  );
+}
+
+function MicrosoftIcon() {
+  return (
+    <svg aria-hidden="true" className="h-4.5 w-4.5" viewBox="0 0 24 24">
+      <path fill="#F25022" d="M3 3h8.5v8.5H3z" />
+      <path fill="#7FBA00" d="M12.5 3H21v8.5h-8.5z" />
+      <path fill="#00A4EF" d="M3 12.5h8.5V21H3z" />
+      <path fill="#FFB900" d="M12.5 12.5H21V21h-8.5z" />
+    </svg>
+  );
 }
 
 function rememberLoginMethod(method: LoginMethod) {
   window.localStorage.setItem(loginMethodStorageKey, method);
-  window.dispatchEvent(new Event(loginMethodChangeEvent));
-}
-
-function redirectToTarget(target: string) {
-  window.location.assign(target);
 }
 
 function isMfaChallenge(result: AuthLoginResponse): result is AuthMfaChallenge {
@@ -192,34 +150,8 @@ function getMfaStatusMessage(method: MfaMethod) {
   return "Enter one of your saved recovery codes.";
 }
 
-function getStoredLoginMethod(): LoginMethod {
-  if (typeof window === "undefined") {
-    return defaultLoginMethod;
-  }
-
-  const savedMethod = window.localStorage.getItem(loginMethodStorageKey);
-
-  return isLoginMethod(savedMethod) ? savedMethod : defaultLoginMethod;
-}
-
-function subscribeToStoredLoginMethod(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-
-  window.addEventListener("storage", onStoreChange);
-  window.addEventListener(loginMethodChangeEvent, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStoreChange);
-    window.removeEventListener(loginMethodChangeEvent, onStoreChange);
-  };
-}
-
 export function LoginForm() {
-  const [identifier, setIdentifier] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
+  const router = useRouter();
   const [accountEmail, setAccountEmail] = useState("");
   const [accountPassword, setAccountPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
@@ -228,83 +160,54 @@ export function LoginForm() {
   );
   const [selectedMfaMethod, setSelectedMfaMethod] =
     useState<MfaMethod>("email-otp");
-  const loginMethod = useSyncExternalStore(
-    subscribeToStoredLoginMethod,
-    getStoredLoginMethod,
-    () => defaultLoginMethod,
-  );
   const [passwordlessSetupOpen, setPasswordlessSetupOpen] = useState(false);
   const [successfulLogin, setSuccessfulLogin] =
     useState<AuthLoginResult | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const validatedIdentifier = useMemo(
-    () => validateOtpIdentifier(identifier),
-    [identifier],
-  );
-  const identifierError =
-    identifier.trim() && !validatedIdentifier.isValid
-      ? validatedIdentifier.message
-      : null;
-  const passwordlessSetupPrompt = successfulLogin?.passwordlessSetupPrompt;
+  const [activeSocialProvider, setActiveSocialProvider] =
+    useState<SocialLoginProvider | null>(null);
   const activeMfaMethod = mfaChallenge?.mfaMethod ?? selectedMfaMethod;
   const availableMfaMethods = mfaChallenge
     ? getAvailableMfaMethods(mfaChallenge)
     : [];
   const mfaCodeLength = getMfaCodeLength(activeMfaMethod);
 
-  useEffect(() => {
-    if (loginMethod !== "otp" || !otpSent) {
-      return;
+  const redirectToTarget = (target: string) => {
+    setPasswordlessSetupOpen(false);
+    router.replace(target as Route);
+  };
+
+  const redirectActiveSession = async () => {
+    try {
+      const session = await api.currentAuthSession();
+
+      persistAuthSession(session);
+      redirectToTarget(session.nextRoute);
+      return true;
+    } catch {
+      clearAuthSession();
+      return false;
     }
+  };
 
-    const credentialsApi = navigator.credentials as
-      | (CredentialsContainer & {
-          get?: (options?: unknown) => Promise<{ code?: string } | null>;
-        })
-      | undefined;
+  const startSelectedMfaChallenge = async (
+    selectionToken: string,
+    method: MfaMethod,
+  ) => {
+    const result = await api.startMfaLoginChallenge({
+      selectionToken,
+      mfaMethod: method,
+    });
+    const nextMethod = result.mfaMethod ?? method;
 
-    if (
-      typeof window === "undefined" ||
-      !("OTPCredential" in window) ||
-      typeof credentialsApi?.get !== "function"
-    ) {
-      return;
-    }
-
-    const abortController = new AbortController();
-
-    void credentialsApi
-      .get({
-        otp: { transport: ["sms"] },
-        signal: abortController.signal,
-      })
-      .then((credential) => {
-        const code = credential?.code?.replace(/\D/g, "").slice(0, 6) ?? "";
-        if (code) {
-          setOtp(code);
-        }
-      })
-      .catch(() => {
-        // Ignore when WebOTP is unavailable, denied, or aborted.
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [loginMethod, otpSent]);
-
-  const selectLoginMethod = (method: LoginMethod) => {
-    rememberLoginMethod(method);
-    setStatusMessage(null);
-    setMfaChallenge(null);
+    setMfaChallenge({
+      ...result,
+      mfaSelectionToken: selectionToken,
+    });
     setMfaCode("");
-    setSelectedMfaMethod("email-otp");
-
-    if (method !== "otp") {
-      setOtp("");
-      setOtpSent(false);
-    }
+    setSelectedMfaMethod(nextMethod);
+    setStatusMessage(getMfaStatusMessage(nextMethod));
   };
 
   const completeAuthenticatedLogin = (
@@ -328,32 +231,46 @@ export function LoginForm() {
     redirectToTarget(result.nextRoute);
   };
 
+  const continueWithAuthResponse = (
+    result: AuthLoginResponse,
+    methodToRemember?: LoginMethod,
+  ) => {
+    if (isMfaChallenge(result)) {
+      const methods = getAvailableMfaMethods(result);
+      const nextMethod =
+        result.preferredMfaMethod ??
+        result.mfaMethod ??
+        methods[0] ??
+        "email-otp";
+      setMfaChallenge(result);
+      setMfaCode("");
+      setSelectedMfaMethod(nextMethod);
+      setStatusMessage(
+        isMfaSelectionPending(result)
+          ? "Choose a verification method."
+          : getMfaStatusMessage(nextMethod),
+      );
+      return;
+    }
+
+    completeAuthenticatedLogin(result, methodToRemember);
+  };
+
   const completeLogin = async (payload: Parameters<typeof api.login>[0]) => {
     setIsSubmitting(true);
     setStatusMessage(null);
 
     try {
-      const result = await api.login(payload);
-
-      if (isMfaChallenge(result)) {
-        const methods = getAvailableMfaMethods(result);
-        const nextMethod =
-          result.preferredMfaMethod ??
-          result.mfaMethod ??
-          methods[0] ??
-          "email-otp";
-        setMfaChallenge(result);
-        setMfaCode("");
-        setSelectedMfaMethod(nextMethod);
-        setStatusMessage(
-          isMfaSelectionPending(result)
-            ? "Choose a verification method."
-            : getMfaStatusMessage(nextMethod),
-        );
+      if (await redirectActiveSession()) {
         return;
       }
 
-      completeAuthenticatedLogin(result, payload.method);
+      const result = await api.login(payload);
+
+      continueWithAuthResponse(
+        result,
+        payload.method === "passkey" ? "passkey" : "password",
+      );
     } catch (error) {
       setStatusMessage(
         error instanceof Error ? error.message : "Sign-in failed. Try again.",
@@ -361,6 +278,74 @@ export function LoginForm() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleSocialLogin = async (provider: SocialLoginProvider) => {
+    setIsSubmitting(true);
+    setActiveSocialProvider(provider);
+    setStatusMessage(null);
+    setMfaChallenge(null);
+    setMfaCode("");
+
+    try {
+      if (!liveApiEnabled) {
+        throw new Error("SSO sign-in requires live API mode.");
+      }
+
+      if (await redirectActiveSession()) {
+        return;
+      }
+
+      const { idToken } = await beginSocialPopupLogin(provider);
+      const result =
+        provider === "google"
+          ? await api.loginWithGoogleIdToken({ idToken })
+          : await api.loginWithMicrosoftIdToken({ idToken });
+
+      continueWithAuthResponse(result);
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "SSO sign-in failed. Try again.",
+      );
+    } finally {
+      setActiveSocialProvider(null);
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    setStatusMessage(null);
+    setMfaChallenge(null);
+    setMfaCode("");
+    setSelectedMfaMethod("email-otp");
+
+    if (liveApiEnabled) {
+      setIsSubmitting(true);
+
+      try {
+        if (await redirectActiveSession()) {
+          return;
+        }
+
+        const result = await authenticatePasskey();
+
+        continueWithAuthResponse(result, "passkey");
+      } catch (error) {
+        setStatusMessage(
+          error instanceof Error ? error.message : "Passkey sign-in failed.",
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    await completeLogin({
+      method: "passkey",
+      credentialId: "credential-ops-laptop",
+    });
   };
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -376,16 +361,9 @@ export function LoginForm() {
             throw new Error("MFA selection has expired. Sign in again.");
           }
 
-          const result = await api.startMfaLoginChallenge({
-            selectionToken: mfaChallenge.mfaSelectionToken,
-            mfaMethod: selectedMfaMethod,
-          });
-
-          setMfaChallenge(result);
-          setMfaCode("");
-          setSelectedMfaMethod(result.mfaMethod ?? selectedMfaMethod);
-          setStatusMessage(
-            getMfaStatusMessage(result.mfaMethod ?? selectedMfaMethod),
+          await startSelectedMfaChallenge(
+            mfaChallenge.mfaSelectionToken,
+            selectedMfaMethod,
           );
           return;
         }
@@ -444,6 +422,18 @@ export function LoginForm() {
 
         completeAuthenticatedLogin(result, "password");
       } catch (error) {
+        if (
+          error instanceof ApiClientError &&
+          error.status === 401 &&
+          (activeMfaMethod === "email-otp" || activeMfaMethod === "sms-otp")
+        ) {
+          setMfaCode("");
+          setStatusMessage(
+            "Code was not accepted. Use the latest code for this challenge or send a new one.",
+          );
+          return;
+        }
+
         setStatusMessage(
           error instanceof Error
             ? error.message
@@ -455,124 +445,36 @@ export function LoginForm() {
       return;
     }
 
-    if (loginMethod === "passkey") {
-      if (liveApiEnabled) {
-        setIsSubmitting(true);
-        setStatusMessage(null);
+    const identifier = accountEmail.trim().toLowerCase();
 
-        try {
-          const result = await authenticatePasskey();
+    if (!identifier || !accountPassword) {
+      setIsSubmitting(true);
+      setStatusMessage(null);
 
-          if (isMfaChallenge(result)) {
-            const methods = getAvailableMfaMethods(result);
-            const nextMethod =
-              result.preferredMfaMethod ??
-              result.mfaMethod ??
-              methods[0] ??
-              "email-otp";
-            setMfaChallenge(result);
-            setMfaCode("");
-            setSelectedMfaMethod(nextMethod);
-            setStatusMessage(
-              isMfaSelectionPending(result)
-                ? "Choose a verification method."
-                : getMfaStatusMessage(nextMethod),
-            );
-            return;
-          }
-
-          completeAuthenticatedLogin(result, "passkey");
-        } catch (error) {
-          setStatusMessage(
-            error instanceof Error ? error.message : "Passkey sign-in failed.",
-          );
-        } finally {
-          setIsSubmitting(false);
+      try {
+        if (await redirectActiveSession()) {
+          return;
         }
-        return;
+      } finally {
+        setIsSubmitting(false);
       }
 
-      await completeLogin({
-        method: "passkey",
-        credentialId: "credential-ops-laptop",
-      });
-      return;
-    }
-
-    if (loginMethod === "password") {
-      const identifier = accountEmail.trim().toLowerCase();
-
-      if (!identifier || !accountPassword) {
-        setStatusMessage(
-          "Username, email, or phone number and password are required.",
-        );
-        return;
-      }
-
-      await completeLogin({
-        method: "password",
-        email: identifier.includes("@") ? identifier : undefined,
-        phoneNumber: /^\+?\d{9,15}$/.test(identifier) ? identifier : undefined,
-        username: identifier,
-        password: accountPassword,
-      });
-      return;
-    }
-
-    if (!validatedIdentifier.isValid || !validatedIdentifier.normalized) {
       setStatusMessage(
-        validatedIdentifier.message ??
-          "Enter a valid phone number, email, or TIN",
+        "TIN, phone number, email, or staff username and password are required.",
       );
-      return;
-    }
-
-    const normalizedIdentifier = validatedIdentifier.normalized;
-    setIdentifier(normalizedIdentifier);
-
-    if (!otpSent) {
-      setOtpSent(true);
-      setStatusMessage(
-        "OTP sent. Enter the code we just sent to continue signing in.",
-      );
-      return;
-    }
-
-    if (!otp.trim()) {
-      setStatusMessage("Enter the one-time code to complete sign-in.");
       return;
     }
 
     await completeLogin({
-      method: "otp",
-      identifier: normalizedIdentifier,
-      identifierKind: validatedIdentifier.kind ?? undefined,
-      otp: otp.trim(),
+      method: "password",
+      identifier,
+      password: accountPassword,
     });
   };
 
   return (
     <>
       <form onSubmit={onSubmit} className="space-y-3">
-        <div className="flex items-center justify-center gap-2">
-          {loginMethodOptions.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => selectLoginMethod(option.key)}
-              aria-label={option.label}
-              title={option.label}
-              className={`inline-flex h-11 w-11 items-center justify-center rounded-[1rem] border transition-colors ${
-                loginMethod === option.key
-                  ? "border-black bg-black text-white"
-                  : "border-black/10 bg-white/52 text-black/62 hover:bg-white/72"
-              }`}
-            >
-              <option.icon className="h-4.5 w-4.5" />
-            </button>
-          ))}
-        </div>
-
         <div className="grid min-h-[13rem] content-center gap-3">
           {mfaChallenge ? (
             <>
@@ -655,73 +557,57 @@ export function LoginForm() {
                   <p className="text-center text-xs text-black/56">
                     {getMfaStatusMessage(activeMfaMethod)}
                   </p>
-                </>
-              )}
-            </>
-          ) : loginMethod === "otp" ? (
-            <>
-              <label className="block text-center text-xs font-medium text-black/66">
-                Phone Number, Email, or TIN
-              </label>
-              <input
-                className="h-11 w-full rounded-xl border border-white/28 bg-white/18 px-3 py-2 text-center text-sm text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-xl placeholder:text-center placeholder:text-black/40"
-                placeholder="Enter phone number, email, or TIN"
-                value={identifier}
-                onChange={(event) => {
-                  setIdentifier(event.target.value);
-                  setStatusMessage(null);
-                  if (otpSent) {
-                    setOtpSent(false);
-                    setOtp("");
-                  }
-                }}
-              />
-              {identifierError && (
-                <p className="text-xs text-destructive">{identifierError}</p>
-              )}
-              {!otpSent ? (
-                <p className="text-center text-xs text-black/56">
-                  Tap sign in to request your one-time code.
-                </p>
-              ) : null}
+                  {(activeMfaMethod === "email-otp" ||
+                    activeMfaMethod === "sms-otp") &&
+                  mfaChallenge.mfaSelectionToken ? (
+                    <button
+                      type="button"
+                      className="mx-auto text-xs font-semibold text-black underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isSubmitting}
+                      onClick={async () => {
+                        if (!mfaChallenge.mfaSelectionToken) {
+                          return;
+                        }
 
-              {otpSent && (
-                <>
-                  <label className="block text-center text-xs font-medium text-black/66">
-                    OTP Code
-                  </label>
-                  <OtpCodeInput
-                    value={otp}
-                    onChange={setOtp}
-                    length={5}
-                    className="px-0 py-1"
-                    inputClassName="h-11 w-11 rounded-xl border border-white/28 bg-white/18 text-center text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-xl"
-                  />
-                  <p className="text-center text-xs text-black/56">
-                    We can fill the code automatically from SMS where supported.
-                    Email codes may also appear as suggestions on your device.
-                  </p>
+                        setIsSubmitting(true);
+                        setStatusMessage(null);
+
+                        try {
+                          await startSelectedMfaChallenge(
+                            mfaChallenge.mfaSelectionToken,
+                            activeMfaMethod,
+                          );
+                          setStatusMessage(
+                            "A new code has been sent. Use the latest code.",
+                          );
+                        } catch (error) {
+                          setStatusMessage(
+                            error instanceof Error
+                              ? error.message
+                              : "Could not send a new code. Sign in again.",
+                          );
+                        } finally {
+                          setIsSubmitting(false);
+                        }
+                      }}
+                    >
+                      Send new code
+                    </button>
+                  ) : null}
                 </>
               )}
             </>
-          ) : loginMethod === "passkey" ? (
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-white/28 bg-white/18 p-4 text-center text-sm text-black/64 shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-xl">
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black text-white">
-                <Fingerprint className="h-6 w-6" />
-              </span>
-              <span>Use fingerprint, face unlock, or your device lock.</span>
-            </div>
           ) : (
             <>
               <label className="block text-center text-xs font-medium text-black/66">
-                Username, Email, or Phone
+                TIN, Phone, Email, or Staff Username
               </label>
               <input
                 className="h-11 w-full rounded-xl border border-white/28 bg-white/18 px-3 py-2 text-center text-sm text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-xl placeholder:text-center placeholder:text-black/40"
                 type="text"
                 inputMode="text"
                 autoComplete="username"
-                placeholder="Enter username, email, or phone"
+                placeholder="Enter TIN, phone, email, or staff username"
                 value={accountEmail}
                 onChange={(event) => {
                   setAccountEmail(event.target.value);
@@ -731,7 +617,7 @@ export function LoginForm() {
               <label className="block text-center text-xs font-medium text-black/66">
                 Password
               </label>
-              <input
+              <Input
                 className="h-11 w-full rounded-xl border border-white/28 bg-white/18 px-3 py-2 text-center text-sm text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.28)] backdrop-blur-xl placeholder:text-center placeholder:text-black/40"
                 type="password"
                 autoComplete="current-password"
@@ -743,8 +629,15 @@ export function LoginForm() {
                 }}
               />
               <p className="text-center text-xs text-black/56">
-                Enter your password, then complete verification if required.
+                Customers can use TIN, phone, or email. Staff users use their AD
+                username.
               </p>
+              <button
+                className="h-11 w-full rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white shadow-[0_18px_38px_rgba(15,23,42,0.16)] transition-colors hover:bg-black/92 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Signing in..." : "Sign in"}
+              </button>
             </>
           )}
         </div>
@@ -758,12 +651,71 @@ export function LoginForm() {
           )}
         </div>
 
-        <button
-          className="h-11 w-full rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white shadow-[0_18px_38px_rgba(15,23,42,0.16)] transition-colors hover:bg-black/92 disabled:cursor-not-allowed disabled:opacity-70"
-          disabled={isSubmitting}
-        >
-          {mfaChallenge
-            ? isMfaSelectionPending(mfaChallenge)
+        {!mfaChallenge ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-black/10" />
+              <span className="text-[0.68rem] font-semibold uppercase text-black/42">
+                or
+              </span>
+              <div className="h-px flex-1 bg-black/10" />
+            </div>
+
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                aria-label="Continue with fingerprint, face unlock, or device lock"
+                title="Use fingerprint, face unlock, or device lock"
+                disabled={isSubmitting}
+                onClick={() => void handlePasskeyLogin()}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-[1rem] border border-black/10 bg-white/52 text-black transition-colors hover:bg-white/72 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Fingerprint className="h-4.5 w-4.5" />
+              </button>
+
+              {ssoConfigured ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Continue with Google"
+                    title={
+                      googleSsoConfigured
+                        ? "Continue with Google"
+                        : "Google sign-in is not configured"
+                    }
+                    disabled={isSubmitting || !googleSsoConfigured}
+                    onClick={() => void handleSocialLogin("google")}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-[1rem] border border-black/10 bg-white/52 text-black transition-colors hover:bg-white/72 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <GoogleIcon />
+                  </button>
+
+                  <button
+                    type="button"
+                    aria-label="Continue with Microsoft"
+                    title={
+                      microsoftSsoConfigured
+                        ? "Continue with Microsoft"
+                        : "Microsoft sign-in is not configured"
+                    }
+                    disabled={isSubmitting || !microsoftSsoConfigured}
+                    onClick={() => void handleSocialLogin("microsoft")}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-[1rem] border border-black/10 bg-white/52 text-black transition-colors hover:bg-white/72 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <MicrosoftIcon />
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {mfaChallenge ? (
+          <button
+            className="h-11 w-full rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white shadow-[0_18px_38px_rgba(15,23,42,0.16)] transition-colors hover:bg-black/92 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={isSubmitting}
+          >
+            {isMfaSelectionPending(mfaChallenge)
               ? isSubmitting
                 ? "Starting verification..."
                 : `Use ${mfaMethodOptions[selectedMfaMethod].label}`
@@ -775,82 +727,29 @@ export function LoginForm() {
                   ? "Verifying..."
                   : activeMfaMethod === "recovery-code"
                     ? "Verify recovery code"
-                    : "Verify code"
-            : loginMethod === "passkey"
-              ? isSubmitting
-                ? "Checking passkey..."
-                : "Use passkey"
-              : loginMethod === "password"
-                ? isSubmitting
-                  ? "Signing in..."
-                  : "Sign in"
-                : otpSent
-                  ? isSubmitting
-                    ? "Verifying..."
-                    : "Verify OTP"
-                  : "Request OTP"}
-        </button>
+                    : "Verify code"}
+          </button>
+        ) : null}
       </form>
 
-      {isSubmitting && <BrandLoader overlay label="Signing you in" />}
+      {isSubmitting && (
+        <BrandLoader
+          overlay
+          overlayBackdrop={false}
+          label={
+            activeSocialProvider
+              ? `Opening ${activeSocialProvider === "google" ? "Google" : "Microsoft"} sign in`
+              : "Signing you in"
+          }
+        />
+      )}
 
-      <Dialog
+      <PasskeySetupPrompt
         open={passwordlessSetupOpen}
         onOpenChange={setPasswordlessSetupOpen}
-      >
-        <DialogContent
-          showCloseButton={false}
-          className="max-w-md rounded-[1.4rem] border border-white/30 bg-white/92 p-0 text-black shadow-[0_24px_60px_rgba(15,23,42,0.2)] backdrop-blur-xl"
-        >
-          <div className="space-y-5 p-5">
-            <DialogHeader className="space-y-2 text-left">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-black text-white">
-                <ShieldCheck className="h-5 w-5" />
-              </div>
-              <DialogTitle className="text-xl text-black">
-                {passwordlessSetupPrompt?.title ?? "Set up passwordless login"}
-              </DialogTitle>
-              <DialogDescription className="text-black/62">
-                {passwordlessSetupPrompt?.message ??
-                  "Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock."}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="rounded-[1rem] border border-black/8 bg-black/[0.035] p-4 text-sm text-black/70">
-              You are signed in. You can set up a passkey now from Security, or
-              continue and do it later.
-            </div>
-
-            <DialogFooter>
-              <button
-                type="button"
-                className="h-10 rounded-xl border border-black/10 bg-white px-4 text-sm font-semibold text-black transition-colors hover:bg-black/[0.04]"
-                onClick={() => {
-                  if (successfulLogin) {
-                    redirectToTarget(successfulLogin.nextRoute);
-                  }
-                }}
-              >
-                Later
-              </button>
-              <button
-                type="button"
-                className="h-10 rounded-xl bg-black px-4 text-sm font-semibold text-white transition-colors hover:bg-black/90"
-                onClick={() => {
-                  const target =
-                    passwordlessSetupPrompt?.setupUrl ??
-                    successfulLogin?.nextRoute ??
-                    "/console";
-                  redirectToTarget(target);
-                }}
-              >
-                <Fingerprint className="mr-2 inline h-4 w-4" />
-                Set up passkey
-              </button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
+        loginResult={successfulLogin}
+        onContinue={redirectToTarget}
+      />
     </>
   );
 }

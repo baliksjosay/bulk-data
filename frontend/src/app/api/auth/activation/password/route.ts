@@ -10,10 +10,11 @@ const activationPasswordSchema = z
     passwordSetupToken: z.string().trim().min(8),
     password: z
       .string()
-      .min(12)
+      .min(14)
       .regex(/[a-z]/)
       .regex(/[A-Z]/)
-      .regex(/\d/),
+      .regex(/\d/)
+      .regex(/[^A-Za-z0-9]/),
     confirmPassword: z.string().min(1),
   })
   .refine((payload) => payload.password === payload.confirmPassword, {

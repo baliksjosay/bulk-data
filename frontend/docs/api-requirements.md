@@ -44,7 +44,7 @@ Content-Type: application/json
 
 {
   "method": "password",
-  "email": "customer@example.com",
+  "identifier": "1000172796",
   "password": "********"
 }
 ```

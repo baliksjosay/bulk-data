@@ -14,7 +14,7 @@ Content-Type: application/json
 
 {
   "method": "password",
-  "email": "operations@wavenet.ug",
+  "identifier": "1000172796",
   "password": "********"
 }
 ```
@@ -1282,6 +1282,7 @@ Content-Type: application/json
 {
   "businessName": "Kampala Fiber Hub",
   "registrationNumber": "UG-BR-90321",
+  "tin": "1000172796",
   "businessEmail": "operations@kampalafiber.ug",
   "businessPhone": "+256772441120",
   "contactPerson": "Grace Nansubuga",
@@ -1314,6 +1315,7 @@ Content-Type: application/json
       "id": "cus-kfh",
       "businessName": "Kampala Fiber Hub",
       "registrationNumber": "UG-BR-90321",
+      "tin": "1000172796",
       "businessEmail": "operations@kampalafiber.ug",
       "businessPhone": "+256772441120",
       "contactPerson": "Grace Nansubuga",
@@ -1335,6 +1337,12 @@ Content-Type: application/json
       "apnIds": ["APN-2201"],
       "registeredApnId": "APN-2201",
       "provisioningAction": "addSubscriber"
+    },
+    "activation": {
+      "activationToken": "act_demo",
+      "activationUrl": "/auth/activate?token=act_demo",
+      "expiresAt": "2026-04-23T10:00:00+03:00",
+      "deliveryChannels": ["contact_email", "contact_phone"]
     }
   }
 }

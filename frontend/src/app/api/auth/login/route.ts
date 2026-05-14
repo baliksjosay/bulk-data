@@ -14,10 +14,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const loginSchema = z.object({
-  method: z.enum(["otp", "password", "passkey"]),
+  method: z.enum(["password", "passkey"]),
   identifier: z.string().optional(),
-  identifierKind: z.enum(["phone", "email", "tin"]).optional(),
-  otp: z.string().optional(),
   email: z.string().email().optional(),
   username: z.string().optional(),
   phoneNumber: z.string().optional(),
@@ -46,11 +44,14 @@ export async function POST(request: Request) {
 
   if (payload.method === "password") {
     if (
-      (!payload.email && !payload.username && !payload.phoneNumber) ||
+      (!payload.identifier &&
+        !payload.email &&
+        !payload.username &&
+        !payload.phoneNumber) ||
       !payload.password
     ) {
       return fail(
-        "Username, email, or phone number and password are required",
+        "TIN, phone number, email, or staff username and password are required",
         422,
       );
     }
@@ -70,31 +71,8 @@ export async function POST(request: Request) {
     const result = makeLoginResult(user, true);
     addAuditEvent({
       category: "security",
-      action: "Email password login",
+      action: "Password login",
       actor: result.user.email,
-      outcome: "success",
-    });
-
-    return okWithSessionCookie(result);
-  }
-
-  if (payload.method === "otp") {
-    if (!payload.identifier || !payload.otp) {
-      return fail("Identifier and OTP code are required", 422);
-    }
-
-    const user = resolveDemoLoginUser(payload);
-    const blockReason = getCustomerLoginBlockReason(user);
-
-    if (blockReason) {
-      return fail(blockReason, 401);
-    }
-
-    const result = makeLoginResult(user, true);
-    addAuditEvent({
-      category: "security",
-      action: "OTP login",
-      actor: payload.identifier,
       outcome: "success",
     });
 

@@ -5,8 +5,15 @@ import { UGANDA_PHONE_PATTERN } from "@/lib/uganda-phone";
 
 export const dynamic = "force-dynamic";
 
+const trimmedOptionalString = (schema: z.ZodString) =>
+  z.preprocess(
+    (value) => (typeof value === "string" ? value.trim() : value),
+    schema.optional(),
+  );
+
 const customerUpdateSchema = z.object({
   businessName: z.string().min(2).optional(),
+  tin: trimmedOptionalString(z.string().max(40)),
   businessEmail: z.string().email().optional(),
   businessPhone: z.string().regex(UGANDA_PHONE_PATTERN).optional(),
   contactPerson: z.string().min(2).optional(),
@@ -39,6 +46,17 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (!parsed.success) {
     return fail("Validation failed", 422);
+  }
+
+  if (
+    parsed.data.tin &&
+    customers.some(
+      (customer) =>
+        customer.id !== customerId &&
+        customer.tin?.toLowerCase() === parsed.data.tin?.toLowerCase(),
+    )
+  ) {
+    return fail("A customer with this TIN already exists", 409);
   }
 
   const customer = updateCustomer(customerId, parsed.data);

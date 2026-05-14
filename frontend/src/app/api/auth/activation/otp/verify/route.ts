@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 const activationOtpVerificationSchema = z.object({
   token: z.string().trim().min(8),
   activationId: z.string().trim().min(1),
-  otp: z.string().regex(/^\d{6}$/),
+  otp: z.string().regex(/^\d{5}$/),
 });
 
 export async function POST(request: Request) {

@@ -34,8 +34,7 @@ export function AuthPageShell({
                   width={88}
                   height={40}
                   className="h-10 w-auto"
-                  style={{ width: "auto" }}
-                  priority
+                  style={{ width: "auto", height: "auto" }}
                 />
               </Link>
               <h1 className="mt-6 text-4xl font-semibold leading-tight text-balance sm:text-5xl">
@@ -67,8 +66,7 @@ export function AuthPageShell({
                   width={80}
                   height={36}
                   className="h-9 w-auto"
-                  style={{ width: "auto" }}
-                  priority
+                  style={{ width: "auto", height: "auto" }}
                 />
               </Link>
               <p className="text-base font-semibold text-black/72">{title}</p>

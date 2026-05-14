@@ -126,30 +126,36 @@ const metricCardThemes: Record<
   }
 > = {
   yellow: {
-    card: "border-yellow-300/70 bg-yellow-100 text-yellow-950 shadow-yellow-100/60 dark:border-yellow-400/35 dark:bg-yellow-950/45 dark:text-yellow-50",
-    label: "text-yellow-950/70 dark:text-yellow-100/75",
-    trend: "text-yellow-950/75 dark:text-yellow-100/80",
-    icon: "bg-yellow-300/85 text-yellow-950 dark:bg-yellow-400/20 dark:text-yellow-100",
+    card: "bg-[linear-gradient(135deg,#fff8db_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(223,169,25,0.16)] dark:bg-[linear-gradient(135deg,rgba(255,215,106,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-yellow-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-yellow-100/75",
+    trend: "text-zinc-500 dark:text-yellow-100/70",
+    icon: "bg-yellow-200/85 text-yellow-900 dark:bg-yellow-300/[0.18] dark:text-yellow-100",
   },
   blue: {
-    card: "border-sky-300/70 bg-sky-100 text-sky-950 shadow-sky-100/60 dark:border-sky-400/30 dark:bg-sky-950/45 dark:text-sky-50",
-    label: "text-sky-950/70 dark:text-sky-100/75",
-    trend: "text-sky-950/75 dark:text-sky-100/80",
-    icon: "bg-sky-300/80 text-sky-950 dark:bg-sky-400/20 dark:text-sky-100",
+    card: "bg-[linear-gradient(135deg,#edf8ff_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(77,154,201,0.15)] dark:bg-[linear-gradient(135deg,rgba(139,211,247,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-sky-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-sky-100/75",
+    trend: "text-zinc-500 dark:text-sky-100/70",
+    icon: "bg-sky-100 text-sky-800 dark:bg-sky-300/[0.16] dark:text-sky-100",
   },
   green: {
-    card: "border-emerald-300/70 bg-emerald-100 text-emerald-950 shadow-emerald-100/60 dark:border-emerald-400/30 dark:bg-emerald-950/45 dark:text-emerald-50",
-    label: "text-emerald-950/70 dark:text-emerald-100/75",
-    trend: "text-emerald-950/75 dark:text-emerald-100/80",
-    icon: "bg-emerald-300/80 text-emerald-950 dark:bg-emerald-400/20 dark:text-emerald-100",
+    card: "bg-[linear-gradient(135deg,#edfff5_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(67,174,119,0.14)] dark:bg-[linear-gradient(135deg,rgba(142,230,183,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-emerald-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-emerald-100/75",
+    trend: "text-zinc-500 dark:text-emerald-100/70",
+    icon: "bg-emerald-100 text-emerald-800 dark:bg-emerald-300/[0.16] dark:text-emerald-100",
   },
   red: {
-    card: "border-rose-300/70 bg-rose-100 text-rose-950 shadow-rose-100/60 dark:border-rose-400/30 dark:bg-rose-950/45 dark:text-rose-50",
-    label: "text-rose-950/70 dark:text-rose-100/75",
-    trend: "text-rose-950/75 dark:text-rose-100/80",
-    icon: "bg-rose-300/80 text-rose-950 dark:bg-rose-400/20 dark:text-rose-100",
+    card: "bg-[linear-gradient(135deg,#fff0f0_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(217,111,111,0.14)] dark:bg-[linear-gradient(135deg,rgba(246,162,162,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-rose-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-rose-100/75",
+    trend: "text-zinc-500 dark:text-rose-100/70",
+    icon: "bg-rose-100 text-rose-800 dark:bg-rose-300/[0.16] dark:text-rose-100",
   },
 };
+
+const dashboardCardClass =
+  "border-0 bg-white/[0.88] shadow-[0_14px_36px_rgba(18,24,40,0.07)] dark:bg-white/[0.045] dark:shadow-black/25";
+
+const dashboardStatCardClass =
+  "border-0 shadow-[0_18px_42px_rgba(15,23,42,0.1)] dark:shadow-black/35";
 
 const topCustomerColumns: Array<DataTableColumn<Customer>> = [
   {
@@ -340,11 +346,11 @@ export function DashboardPage() {
   });
 
   if (overviewQuery.isLoading) {
-    return <Panel>Loading overview...</Panel>;
+    return <Panel className={dashboardCardClass}>Loading overview...</Panel>;
   }
 
   if (overviewQuery.isError || !overviewQuery.data) {
-    return <Panel>Overview could not be loaded.</Panel>;
+    return <Panel className={dashboardCardClass}>Overview could not be loaded.</Panel>;
   }
 
   const overview = overviewQuery.data;
@@ -420,7 +426,10 @@ export function DashboardPage() {
           const theme = metricCardThemes[metric.tone];
 
           return (
-            <Panel key={metric.label} className={cn("min-h-32 border shadow-sm", theme.card)}>
+            <Panel
+              key={metric.label}
+              className={cn("min-h-32", dashboardStatCardClass, theme.card)}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className={cn("text-sm font-medium", theme.label)}>{metric.label}</p>
@@ -446,7 +455,7 @@ export function DashboardPage() {
       />
 
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <Panel>
+        <Panel className={dashboardCardClass}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h3 className="font-semibold">Customer Activity</h3>
@@ -466,13 +475,13 @@ export function DashboardPage() {
           />
         </Panel>
 
-        <Panel>
+        <Panel className={dashboardCardClass}>
           <h3 className="font-semibold">Integration Health</h3>
           <div className="mt-4 space-y-3">
             {overview.integrations.map((integration) => (
               <div
                 key={integration.name}
-                className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] p-3"
+                className="flex items-center justify-between gap-3 rounded-md bg-[var(--muted-surface)]/75 p-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] dark:bg-white/[0.045] dark:shadow-none"
               >
                 <div>
                   <p className="font-medium">{integration.name}</p>
@@ -490,7 +499,7 @@ export function DashboardPage() {
         </Panel>
       </div>
 
-      <Panel>
+      <Panel className={dashboardCardClass}>
         <h3 className="font-semibold">Recent Transactions</h3>
         <div className="mt-4">
           <DataTable
@@ -549,7 +558,7 @@ function OverviewAnalyticsCharts({
   return (
     <div className="grid gap-5">
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-        <Panel className="overflow-hidden">
+        <Panel className={cn(dashboardCardClass, "overflow-hidden")}>
           <div className="mb-4 flex flex-col gap-4">
             <div className="min-w-0">
               <h3 className="font-semibold">Revenue Trend</h3>
@@ -625,7 +634,7 @@ function OverviewAnalyticsCharts({
 
               <div className="flex min-w-0 flex-col gap-2 text-sm font-medium">
                 Revenue
-                <span className="flex h-10 min-w-0 items-center rounded-md bg-secondary px-3 text-sm font-semibold text-secondary-foreground">
+                <span className="flex h-10 min-w-0 items-center rounded-md bg-yellow-50 px-3 text-sm font-semibold text-zinc-800 shadow-[inset_0_0_0_1px_rgba(243,191,51,0.18)] dark:bg-yellow-300/[0.10] dark:text-yellow-100 dark:shadow-none">
                   <span className="truncate">
                     {formatUgx(analytics.revenueTrend.reduce((total, item) => total + item.revenueUgx, 0))}
                   </span>
@@ -637,11 +646,11 @@ function OverviewAnalyticsCharts({
             <AreaChart data={analytics.revenueTrend} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
               <defs>
                 <linearGradient id="revenueTrendFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-revenueUgx)" stopOpacity={0.52} />
-                  <stop offset="95%" stopColor="var(--color-revenueUgx)" stopOpacity={0.06} />
+                  <stop offset="5%" stopColor="var(--color-revenueUgx)" stopOpacity={0.34} />
+                  <stop offset="95%" stopColor="var(--color-revenueUgx)" stopOpacity={0.04} />
                 </linearGradient>
               </defs>
-              <CartesianGrid vertical={false} />
+              <CartesianGrid vertical={false} strokeOpacity={0.45} />
               <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={10} />
               <YAxis
                 axisLine={false}
@@ -657,12 +666,13 @@ function OverviewAnalyticsCharts({
                 fill="url(#revenueTrendFill)"
                 stroke="var(--color-revenueUgx)"
                 strokeWidth={2}
+                strokeLinecap="round"
               />
             </AreaChart>
           </ChartContainer>
         </Panel>
 
-        <Panel>
+        <Panel className={dashboardCardClass}>
           <div className="mb-4">
             <h3 className="font-semibold">Payment Mix</h3>
             <p className="text-sm text-[var(--muted)]">Revenue concentration by payment channel.</p>
@@ -678,6 +688,7 @@ function OverviewAnalyticsCharts({
                 outerRadius={86}
                 paddingAngle={3}
                 strokeWidth={4}
+                stroke="var(--card)"
               >
                 {paymentMix.map((item) => (
                   <Cell key={item.paymentMethod} fill={item.fill} />
@@ -700,14 +711,14 @@ function OverviewAnalyticsCharts({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <Panel className="lg:col-span-1">
+        <Panel className={cn(dashboardCardClass, "lg:col-span-1")}>
           <div className="mb-4">
             <h3 className="font-semibold">Customer Contribution</h3>
             <p className="text-sm text-[var(--muted)]">Spend concentration across accounts.</p>
           </div>
           <ChartContainer config={customerSpendChartConfig} className="h-72 w-full">
             <BarChart data={analytics.customerSpend} layout="vertical" margin={{ left: 4, right: 18 }}>
-              <CartesianGrid horizontal={false} />
+              <CartesianGrid horizontal={false} strokeOpacity={0.45} />
               <XAxis
                 type="number"
                 axisLine={false}
@@ -723,23 +734,28 @@ function OverviewAnalyticsCharts({
                 width={88}
               />
               <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-              <Bar dataKey="spendUgx" fill="var(--color-spendUgx)" radius={[0, 6, 6, 0]} />
+              <Bar
+                dataKey="spendUgx"
+                fill="var(--color-spendUgx)"
+                fillOpacity={0.82}
+                radius={[0, 6, 6, 0]}
+              />
             </BarChart>
           </ChartContainer>
         </Panel>
 
-        <Panel>
+        <Panel className={dashboardCardClass}>
           <div className="mb-4">
             <h3 className="font-semibold">Provisioning Outcomes</h3>
             <p className="text-sm text-[var(--muted)]">Transaction state distribution.</p>
           </div>
           <ChartContainer config={statusBreakdownChartConfig} className="h-72 w-full">
             <BarChart data={statusBreakdown} margin={{ left: 8, right: 12 }}>
-              <CartesianGrid vertical={false} />
+              <CartesianGrid vertical={false} strokeOpacity={0.45} />
               <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={10} />
               <YAxis axisLine={false} tickLine={false} tickMargin={8} allowDecimals={false} width={36} />
               <ChartTooltip cursor={false} content={<ChartTooltipContent nameKey="status" hideLabel />} />
-              <Bar dataKey="transactions" radius={[6, 6, 0, 0]}>
+              <Bar dataKey="transactions" radius={[6, 6, 0, 0]} fillOpacity={0.82}>
                 {statusBreakdown.map((item) => (
                   <Cell key={item.status} fill={item.fill} />
                 ))}
@@ -748,14 +764,14 @@ function OverviewAnalyticsCharts({
           </ChartContainer>
         </Panel>
 
-        <Panel>
+        <Panel className={dashboardCardClass}>
           <div className="mb-4">
             <h3 className="font-semibold">Integration Latency</h3>
             <p className="text-sm text-[var(--muted)]">Fastest signal for operational risk.</p>
           </div>
           <ChartContainer config={integrationLatencyChartConfig} className="h-72 w-full">
             <BarChart data={integrationLatency} margin={{ left: 4, right: 12 }}>
-              <CartesianGrid vertical={false} />
+              <CartesianGrid vertical={false} strokeOpacity={0.45} />
               <XAxis dataKey="name" axisLine={false} tickLine={false} tickMargin={10} />
               <YAxis
                 axisLine={false}
@@ -765,7 +781,7 @@ function OverviewAnalyticsCharts({
                 width={54}
               />
               <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-              <Bar dataKey="latencyMs" radius={[6, 6, 0, 0]}>
+              <Bar dataKey="latencyMs" radius={[6, 6, 0, 0]} fillOpacity={0.82}>
                 {integrationLatency.map((item) => (
                   <Cell key={item.name} fill={item.fill} />
                 ))}

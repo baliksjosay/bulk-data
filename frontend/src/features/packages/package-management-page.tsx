@@ -66,30 +66,41 @@ const summaryPanelThemes: Record<
   {
     card: string;
     label: string;
+    detail: string;
     icon: string;
   }
 > = {
   yellow: {
-    card: "border-yellow-300/70 bg-yellow-100 text-yellow-950 shadow-yellow-100/60 dark:border-yellow-400/35 dark:bg-yellow-950/45 dark:text-yellow-50",
-    label: "text-yellow-950/70 dark:text-yellow-100/75",
-    icon: "bg-yellow-300/85 text-yellow-950 dark:bg-yellow-400/20 dark:text-yellow-100",
+    card: "bg-[linear-gradient(135deg,#fff8db_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(223,169,25,0.16)] dark:bg-[linear-gradient(135deg,rgba(255,215,106,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-yellow-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-yellow-100/75",
+    detail: "text-zinc-500 dark:text-yellow-100/70",
+    icon: "bg-yellow-200/85 text-yellow-900 dark:bg-yellow-300/[0.18] dark:text-yellow-100",
   },
   green: {
-    card: "border-emerald-300/70 bg-emerald-100 text-emerald-950 shadow-emerald-100/60 dark:border-emerald-400/30 dark:bg-emerald-950/45 dark:text-emerald-50",
-    label: "text-emerald-950/70 dark:text-emerald-100/75",
-    icon: "bg-emerald-300/80 text-emerald-950 dark:bg-emerald-400/20 dark:text-emerald-100",
+    card: "bg-[linear-gradient(135deg,#edfff5_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(67,174,119,0.14)] dark:bg-[linear-gradient(135deg,rgba(142,230,183,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-emerald-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-emerald-100/75",
+    detail: "text-zinc-500 dark:text-emerald-100/70",
+    icon: "bg-emerald-100 text-emerald-800 dark:bg-emerald-300/[0.16] dark:text-emerald-100",
   },
   blue: {
-    card: "border-sky-300/70 bg-sky-100 text-sky-950 shadow-sky-100/60 dark:border-sky-400/30 dark:bg-sky-950/45 dark:text-sky-50",
-    label: "text-sky-950/70 dark:text-sky-100/75",
-    icon: "bg-sky-300/80 text-sky-950 dark:bg-sky-400/20 dark:text-sky-100",
+    card: "bg-[linear-gradient(135deg,#edf8ff_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(77,154,201,0.15)] dark:bg-[linear-gradient(135deg,rgba(139,211,247,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-sky-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-sky-100/75",
+    detail: "text-zinc-500 dark:text-sky-100/70",
+    icon: "bg-sky-100 text-sky-800 dark:bg-sky-300/[0.16] dark:text-sky-100",
   },
   red: {
-    card: "border-rose-300/70 bg-rose-100 text-rose-950 shadow-rose-100/60 dark:border-rose-400/30 dark:bg-rose-950/45 dark:text-rose-50",
-    label: "text-rose-950/70 dark:text-rose-100/75",
-    icon: "bg-rose-300/80 text-rose-950 dark:bg-rose-400/20 dark:text-rose-100",
+    card: "bg-[linear-gradient(135deg,#fff0f0_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(217,111,111,0.14)] dark:bg-[linear-gradient(135deg,rgba(246,162,162,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-rose-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-rose-100/75",
+    detail: "text-zinc-500 dark:text-rose-100/70",
+    icon: "bg-rose-100 text-rose-800 dark:bg-rose-300/[0.16] dark:text-rose-100",
   },
 };
+
+const packageCardClass =
+  "border-0 bg-white/[0.88] shadow-[0_14px_36px_rgba(18,24,40,0.07)] dark:bg-white/[0.045] dark:shadow-black/25";
+
+const packageStatCardClass =
+  "border-0 shadow-[0_18px_42px_rgba(15,23,42,0.1)] dark:shadow-black/35";
 
 function toPackageForm(bundle: BundleOffer): PackageForm {
   return {
@@ -341,17 +352,23 @@ export function PackageManagementPage() {
   }
 
   if (packagesQuery.isLoading) {
-    return <Panel>Loading package management...</Panel>;
+    return (
+      <Panel className={packageCardClass}>Loading package management...</Panel>
+    );
   }
 
   if (packagesQuery.isError || !packagesQuery.data) {
-    return <Panel>Package management could not be loaded.</Panel>;
+    return (
+      <Panel className={packageCardClass}>
+        Package management could not be loaded.
+      </Panel>
+    );
   }
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold">Package Management</h2>
@@ -368,10 +385,11 @@ export function PackageManagementPage() {
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <SummaryPanel
           label="Total packages"
           value={summary.total}
+          detail="Configured wholesale bundles"
           badgeLabel="Catalog"
           badgeTone="blue"
           tone="yellow"
@@ -380,6 +398,7 @@ export function PackageManagementPage() {
         <SummaryPanel
           label="Visible active"
           value={summary.activeVisible}
+          detail="Available for customer purchase"
           badgeLabel="Purchasable"
           badgeTone="green"
           tone="green"
@@ -388,6 +407,7 @@ export function PackageManagementPage() {
         <SummaryPanel
           label="Hidden"
           value={summary.hidden}
+          detail="Kept out of customer journeys"
           badgeLabel="Hidden"
           badgeTone="neutral"
           tone="blue"
@@ -396,6 +416,7 @@ export function PackageManagementPage() {
         <SummaryPanel
           label="Disabled"
           value={summary.disabled}
+          detail="Blocked from new purchases"
           badgeLabel="Blocked"
           badgeTone="red"
           tone="red"
@@ -403,7 +424,7 @@ export function PackageManagementPage() {
         />
       </div>
 
-      <Panel>
+      <Panel className={packageCardClass}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold">
@@ -491,7 +512,7 @@ export function PackageManagementPage() {
             options={statusOptions}
           />
 
-          <Label className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2 text-sm font-medium md:col-span-2 xl:col-span-2">
+          <Label className="flex min-h-10 items-center justify-between gap-3 rounded-md bg-[var(--muted-surface)]/75 px-3 py-2 text-sm font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)] dark:bg-white/[0.045] dark:shadow-none md:col-span-2 xl:col-span-2">
             Visible to customers
             <Switch
               checked={form.visible}
@@ -500,7 +521,7 @@ export function PackageManagementPage() {
             />
           </Label>
 
-          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] pt-4 md:col-span-2 xl:col-span-6">
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)]/70 pt-4 md:col-span-2 xl:col-span-6">
             {(formError ||
               createMutation.isError ||
               updateMutation.isError) && (
@@ -530,7 +551,18 @@ export function PackageManagementPage() {
         </form>
       </Panel>
 
-      <Panel>
+      <Panel className={packageCardClass}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Package Catalog</h3>
+            <p className="text-sm text-[var(--muted)]">
+              Price, volume, visibility, and provisioning service code.
+            </p>
+          </div>
+          {quickUpdateMutation.isPending && (
+            <StatusBadge label="Updating" tone="blue" />
+          )}
+        </div>
         <DataTable
           columns={packageColumns}
           rows={packagesQuery.data}
@@ -555,6 +587,7 @@ export function PackageManagementPage() {
 function SummaryPanel({
   label,
   value,
+  detail,
   badgeLabel,
   badgeTone = "blue",
   tone,
@@ -562,6 +595,7 @@ function SummaryPanel({
 }: {
   label: string;
   value: number;
+  detail: string;
   badgeLabel: string;
   badgeTone?: StatusBadgeTone;
   tone: SummaryPanelTone;
@@ -570,9 +604,12 @@ function SummaryPanel({
   const theme = summaryPanelThemes[tone];
 
   return (
-    <Panel className={cn("min-h-28 border shadow-sm", theme.card)}>
+    <Panel className={cn("min-h-32", packageStatCardClass, theme.card)}>
       <div className="flex items-start justify-between gap-3">
-        <p className={cn("text-sm font-medium", theme.label)}>{label}</p>
+        <div>
+          <p className={cn("text-sm font-medium", theme.label)}>{label}</p>
+          <p className="mt-2 text-2xl font-semibold">{value}</p>
+        </div>
         <div
           className={cn(
             "grid h-10 w-10 shrink-0 place-items-center rounded-md",
@@ -582,8 +619,8 @@ function SummaryPanel({
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-2xl font-semibold">{value}</p>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className={cn("text-sm font-medium", theme.detail)}>{detail}</p>
         <StatusBadge label={badgeLabel} tone={badgeTone} />
       </div>
     </Panel>

@@ -10,6 +10,34 @@ export type StoredAuthSession = Readonly<{
 
 export const authSessionStorageKey = "mtn-bds-auth-session";
 const authSessionChangeEvent = "mtn-bds-auth-session-change";
+let cachedAuthSessionRaw: string | null = null;
+let cachedAuthSessionSnapshot: StoredAuthSession | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStoredAuthSession(value: unknown): value is StoredAuthSession {
+  if (!isRecord(value) || !isRecord(value.user)) {
+    return false;
+  }
+
+  const role = value.user.role;
+
+  return (
+    typeof value.nextRoute === "string" &&
+    value.nextRoute.startsWith("/") &&
+    typeof value.user.id === "string" &&
+    typeof value.user.email === "string" &&
+    typeof value.user.name === "string" &&
+    (role === "admin" || role === "support" || role === "customer")
+  );
+}
+
+function clearCachedAuthSession() {
+  cachedAuthSessionRaw = null;
+  cachedAuthSessionSnapshot = null;
+}
 
 export function getStoredAuthSession(): StoredAuthSession | null {
   if (typeof window === "undefined") {
@@ -18,14 +46,31 @@ export function getStoredAuthSession(): StoredAuthSession | null {
 
   const raw = window.localStorage.getItem(authSessionStorageKey);
 
+  if (raw === cachedAuthSessionRaw) {
+    return cachedAuthSessionSnapshot;
+  }
+
+  cachedAuthSessionRaw = raw;
+
   if (!raw) {
+    cachedAuthSessionSnapshot = null;
     return null;
   }
 
   try {
-    return JSON.parse(raw) as StoredAuthSession;
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!isStoredAuthSession(parsed)) {
+      window.localStorage.removeItem(authSessionStorageKey);
+      clearCachedAuthSession();
+      return null;
+    }
+
+    cachedAuthSessionSnapshot = parsed;
+    return cachedAuthSessionSnapshot;
   } catch {
     window.localStorage.removeItem(authSessionStorageKey);
+    clearCachedAuthSession();
     return null;
   }
 }
@@ -35,13 +80,15 @@ export function persistAuthSession(result: AuthLoginResult) {
     return;
   }
 
-  window.localStorage.setItem(
-    authSessionStorageKey,
-    JSON.stringify({
-      user: result.user,
-      nextRoute: result.nextRoute,
-    } satisfies StoredAuthSession),
-  );
+  const session = {
+    user: result.user,
+    nextRoute: result.nextRoute,
+  } satisfies StoredAuthSession;
+  const serialized = JSON.stringify(session);
+
+  cachedAuthSessionRaw = serialized;
+  cachedAuthSessionSnapshot = session;
+  window.localStorage.setItem(authSessionStorageKey, serialized);
   window.dispatchEvent(new Event(authSessionChangeEvent));
 }
 
@@ -51,6 +98,7 @@ export function clearAuthSession() {
   }
 
   window.localStorage.removeItem(authSessionStorageKey);
+  clearCachedAuthSession();
   window.dispatchEvent(new Event(authSessionChangeEvent));
 }
 
@@ -69,5 +117,9 @@ function subscribeToAuthSession(onStoreChange: () => void) {
 }
 
 export function useAuthSessionSnapshot() {
-  return useSyncExternalStore(subscribeToAuthSession, getStoredAuthSession, () => null);
+  return useSyncExternalStore(
+    subscribeToAuthSession,
+    getStoredAuthSession,
+    () => null,
+  );
 }

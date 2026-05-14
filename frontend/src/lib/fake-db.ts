@@ -32,13 +32,47 @@ import type {
   TotpEnrollment,
   TotpVerificationResult,
   Transaction,
+  UserAccount,
   UserPreferences,
   WebAuthnDevice,
 } from "@/types/domain";
 
 const now = new Date("2026-04-21T09:00:00+03:00").toISOString();
 const bundleCreatedAt = "2026-04-15T09:00:00+03:00";
-const activationOtpCode = "123456";
+const activationOtpCode = "12345";
+
+export const staffUsers: UserAccount[] = [
+  {
+    id: "usr-admin-001",
+    firstName: "Security",
+    lastName: "Admin",
+    email: "admin@mtn.co.ug",
+    phoneNumber: "+256789172796",
+    authProvider: "ACTIVE_DIRECTORY",
+    externalId: "admin",
+    roles: ["ADMIN"],
+    status: "ACTIVE",
+    emailVerified: true,
+    isLocked: false,
+    createdAt: "2026-04-20T09:00:00+03:00",
+    updatedAt: "2026-04-20T09:00:00+03:00",
+  },
+  {
+    id: "usr-support-001",
+    firstName: "Support",
+    lastName: "Operations",
+    email: "support@mtn.co.ug",
+    phoneNumber: "+256789172798",
+    authProvider: "ACTIVE_DIRECTORY",
+    externalId: "support",
+    roles: ["SUPPORT"],
+    status: "ACTIVE",
+    emailVerified: true,
+    isLocked: false,
+    createdAt: "2026-04-20T09:15:00+03:00",
+    updatedAt: "2026-04-20T09:15:00+03:00",
+  },
+];
 
 type AccountActivationRecord = {
   token: string;
@@ -49,6 +83,7 @@ type AccountActivationRecord = {
 type AccountActivationOtpRecord = AccountActivationRecord & {
   activationId: string;
   otp: string;
+  deliveryChannel: "email" | "sms";
 };
 
 type AccountActivationPasswordRecord = AccountActivationRecord & {
@@ -71,7 +106,7 @@ export const customers: Customer[] = [
     secondaryCount: 0,
     bundlePurchases: 0,
     totalSpendUgx: 0,
-    status: "active",
+    status: "pending",
     createdAt: "2026-04-21T11:00:00+03:00",
   },
   {
@@ -856,6 +891,17 @@ function maskEmail(email: string) {
   return `${localPart.slice(0, 2)}***@${domain}`;
 }
 
+function maskDestination(destination: string) {
+  const [, domain] = destination.split("@");
+
+  if (domain) {
+    return maskEmail(destination);
+  }
+
+  const digits = destination.replace(/\D/g, "");
+  return `${"*".repeat(Math.max(digits.length - 4, 4))}${digits.slice(-4)}`;
+}
+
 export function createAccountActivationNotice(
   customer: Customer,
 ): CustomerActivationNotice {
@@ -872,7 +918,7 @@ export function createAccountActivationNotice(
     activationToken,
     activationUrl: `/auth/activate?token=${encodeURIComponent(activationToken)}`,
     expiresAt,
-    deliveryChannels: ["business_email", "contact_email"],
+    deliveryChannels: ["business_email", "contact_email", "contact_phone"],
   };
 }
 
@@ -886,7 +932,11 @@ export function getAccountActivationRecord(token: string) {
   return record;
 }
 
-export function createAccountActivationOtp(token: string, email: string) {
+export function createAccountActivationOtp(
+  token: string,
+  destination: string,
+  deliveryChannel: "email" | "sms",
+) {
   const record = getAccountActivationRecord(token);
 
   if (!record) {
@@ -900,19 +950,24 @@ export function createAccountActivationOtp(token: string, email: string) {
     ...record,
     activationId,
     otp: activationOtpCode,
+    deliveryChannel,
     expiresAt,
   });
 
   addAuditEvent({
     category: "security",
     action: "Activation OTP issued",
-    actor: email,
+    actor: destination,
     outcome: "success",
   });
 
+  const maskedDestination = maskDestination(destination);
+
   return {
     activationId,
-    maskedEmail: maskEmail(email),
+    maskedEmail: deliveryChannel === "email" ? maskedDestination : "",
+    maskedDestination,
+    deliveryChannel,
     expiresAt,
     retryAfterSeconds: 60,
   };
@@ -1104,21 +1159,59 @@ export function validateMsisdnForCustomer(
   };
 }
 
-export function registerCustomer(payload: CustomerRegistrationRequest) {
-  const validation = validateMsisdnForCustomer(
-    payload.primaryMsisdn,
-    payload,
-    "addSubscriber",
+function findPrimaryOwner(msisdn: string) {
+  return (
+    customers.find((customer) => customer.primaryMsisdns.includes(msisdn)) ??
+    null
   );
+}
 
-  if (!validation.accepted) {
-    return { customer: null, validation };
+export function registerCustomer(payload: CustomerRegistrationRequest) {
+  const registrationNumber =
+    payload.registrationNumber?.trim() ||
+    payload.tin?.trim() ||
+    `CUST-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  const tin = payload.tin?.trim() || undefined;
+  const requestedPrimaryMsisdn = payload.primaryMsisdn?.trim();
+
+  if (
+    customers.some(
+      (customer) => customer.registrationNumber === registrationNumber,
+    )
+  ) {
+    return {
+      customer: null,
+      validation: {
+        msisdn: requestedPrimaryMsisdn ?? "",
+        accepted: false,
+        reason: "Customer registration number already exists",
+        apnIds: [],
+        registeredApnId: payload.apnId,
+      } satisfies MsisdnValidationResult,
+    };
   }
+
+  if (tin && customers.some((customer) => customer.tin === tin)) {
+    return {
+      customer: null,
+      validation: {
+        msisdn: requestedPrimaryMsisdn ?? "",
+        accepted: false,
+        reason: "Customer TIN already exists",
+        apnIds: [],
+        registeredApnId: payload.apnId,
+      } satisfies MsisdnValidationResult,
+    };
+  }
+
+  let validation: MsisdnValidationResult | undefined;
+  const primaryMsisdns: string[] = [];
 
   const customer: Customer = {
     id: `cus-${Math.random().toString(36).slice(2, 9)}`,
     businessName: payload.businessName,
-    registrationNumber: payload.registrationNumber,
+    registrationNumber,
+    tin,
     businessEmail: payload.businessEmail,
     businessPhone: payload.businessPhone,
     contactPerson: payload.contactPerson,
@@ -1126,23 +1219,63 @@ export function registerCustomer(payload: CustomerRegistrationRequest) {
     phone: payload.contactPhone,
     apnName: payload.apnName,
     apnId: payload.apnId,
-    primaryMsisdns: [payload.primaryMsisdn],
+    primaryMsisdns,
     secondaryCount: 0,
     bundlePurchases: 0,
     totalSpendUgx: 0,
-    status: "pending",
+    status: "active",
     createdAt: new Date().toISOString(),
   };
 
+  if (requestedPrimaryMsisdn) {
+    const primaryOwner = findPrimaryOwner(requestedPrimaryMsisdn);
+    const secondaryOwner = secondaryNumbers.find(
+      (item) =>
+        item.msisdn === requestedPrimaryMsisdn && item.status === "active",
+    );
+
+    if (primaryOwner) {
+      validation = {
+        msisdn: requestedPrimaryMsisdn,
+        accepted: false,
+        reason: "MSISDN is already registered as a primary number",
+        apnIds: [primaryOwner.apnId],
+        registeredApnId: primaryOwner.apnId,
+        provisioningAction: "addSubscriber",
+      };
+    } else if (secondaryOwner) {
+      validation = {
+        msisdn: requestedPrimaryMsisdn,
+        accepted: false,
+        reason: "MSISDN is already registered as a secondary number",
+        apnIds: [secondaryOwner.apnId],
+        registeredApnId: secondaryOwner.apnId,
+        provisioningAction: "addSubscriber",
+      };
+    } else {
+      validation = validateMsisdnForCustomer(
+        requestedPrimaryMsisdn,
+        customer,
+        "addSubscriber",
+      );
+
+      if (validation.accepted) {
+        primaryMsisdns.push(requestedPrimaryMsisdn);
+      }
+    }
+  }
+
   customers.unshift(customer);
-  balances.unshift({
-    primaryMsisdn: payload.primaryMsisdn,
-    bundleName: "No active bundle",
-    totalVolumeGb: 0,
-    remainingVolumeGb: 0,
-    expiryAt: new Date().toISOString(),
-    autoTopupRemaining: 0,
-  });
+  if (validation?.accepted && requestedPrimaryMsisdn) {
+    balances.unshift({
+      primaryMsisdn: requestedPrimaryMsisdn,
+      bundleName: "No active bundle",
+      totalVolumeGb: 0,
+      remainingVolumeGb: 0,
+      expiryAt: new Date().toISOString(),
+      autoTopupRemaining: 0,
+    });
+  }
   addAuditEvent({
     category: "customer",
     action: "Customer registered",
@@ -1238,6 +1371,7 @@ export function convertServiceRequestToCustomer(
     serviceRequest,
     customer: result.customer,
     validation: result.validation,
+    activation: result.activation,
   };
 }
 
@@ -1251,8 +1385,12 @@ export function updateCustomer(
     return null;
   }
 
+  const nextTin =
+    payload.tin === undefined ? customer.tin : payload.tin.trim() || undefined;
+
   Object.assign(customer, {
     businessName: payload.businessName ?? customer.businessName,
+    tin: nextTin,
     businessEmail: payload.businessEmail ?? customer.businessEmail,
     businessPhone: payload.businessPhone ?? customer.businessPhone,
     contactPerson: payload.contactPerson ?? customer.contactPerson,
@@ -1315,17 +1453,36 @@ export function addPrimaryMsisdn(
 
   if (
     !validation.accepted ||
+    findPrimaryOwner(payload.primaryMsisdn) ||
+    secondaryNumbers.some(
+      (item) =>
+        item.msisdn === payload.primaryMsisdn && item.status === "active",
+    ) ||
     customer.primaryMsisdns.includes(payload.primaryMsisdn)
   ) {
+    const alreadyPrimary = findPrimaryOwner(payload.primaryMsisdn);
+    const alreadySecondary = secondaryNumbers.some(
+      (item) =>
+        item.msisdn === payload.primaryMsisdn && item.status === "active",
+    );
+
     return {
       customer,
-      validation: customer.primaryMsisdns.includes(payload.primaryMsisdn)
-        ? {
-            ...validation,
-            accepted: false,
-            reason: "Primary MSISDN is already registered to this customer",
-          }
-        : validation,
+      validation:
+        alreadyPrimary ||
+        customer.primaryMsisdns.includes(payload.primaryMsisdn)
+          ? {
+              ...validation,
+              accepted: false,
+              reason: "Primary MSISDN is already registered to this customer",
+            }
+          : alreadySecondary
+            ? {
+                ...validation,
+                accepted: false,
+                reason: "MSISDN is already registered as a secondary number",
+              }
+            : validation,
     };
   }
 
@@ -1446,15 +1603,24 @@ export function addSecondaryNumber(
   const existing = secondaryNumbers.find(
     (item) => item.msisdn === payload.msisdn && item.status === "active",
   );
-  const validation = existing
+  const primaryOwner = findPrimaryOwner(payload.msisdn);
+  const validation = primaryOwner
     ? ({
         msisdn: payload.msisdn,
         accepted: false,
-        reason: "MSISDN is already part of a secondary number family",
-        apnIds: [customer.apnId],
-        registeredApnId: customer.apnId,
+        reason: "MSISDN is already registered as a primary number",
+        apnIds: [primaryOwner.apnId],
+        registeredApnId: primaryOwner.apnId,
       } satisfies MsisdnValidationResult)
-    : validateMsisdnForCustomer(payload.msisdn, customer, "addGroupMember");
+    : existing
+      ? ({
+          msisdn: payload.msisdn,
+          accepted: false,
+          reason: "MSISDN is already part of a secondary number family",
+          apnIds: [customer.apnId],
+          registeredApnId: customer.apnId,
+        } satisfies MsisdnValidationResult)
+      : validateMsisdnForCustomer(payload.msisdn, customer, "addGroupMember");
 
   if (!validation.accepted) {
     return { secondaryNumber: null, validation };

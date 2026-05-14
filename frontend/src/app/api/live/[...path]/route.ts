@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fail, ok } from "@/lib/api-response";
+import {
+  clearAllAuthCookies,
+  setAuthSessionCookie,
+} from "@/lib/auth-session-cookie";
 import type {
   AuthLoginRequest,
   AuthLoginResponse,
@@ -30,6 +34,13 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+const FORWARDED_RESPONSE_HEADERS = [
+  "retry-after",
+  "x-ratelimit-limit",
+  "x-ratelimit-remaining",
+  "x-ratelimit-reset",
+] as const;
+
 type JsonRecord = Record<string, unknown>;
 type ProxyBodyResult = {
   path: string[];
@@ -41,11 +52,32 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function createProxyHeaders(request: NextRequest) {
+function isPublicLiveAuthPath(path: string[]) {
+  const joinedPath = path.join("/");
+
+  return (
+    joinedPath === "auth/login" ||
+    joinedPath === "auth/login/google" ||
+    joinedPath === "auth/login/microsoft" ||
+    joinedPath === "auth/mfa/start-login-challenge" ||
+    joinedPath === "auth/mfa/complete-login" ||
+    joinedPath === "auth/webauthn/authentication/options" ||
+    joinedPath === "auth/webauthn/authentication/verify" ||
+    joinedPath.startsWith("auth/activation/")
+  );
+}
+
+function createProxyHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+    const normalizedKey = key.toLowerCase();
+
+    if (
+      !HOP_BY_HOP_HEADERS.has(normalizedKey) &&
+      normalizedKey !== "authorization" &&
+      normalizedKey !== "cookie"
+    ) {
       headers.set(key, value);
     }
   });
@@ -53,11 +85,15 @@ function createProxyHeaders(request: NextRequest) {
   headers.set("accept", "application/json");
 
   const accessToken = request.cookies.get(liveAccessTokenCookieName)?.value;
-  if (accessToken && !headers.has("authorization")) {
+  if (accessToken && !isPublicLiveAuthPath(path)) {
     headers.set("authorization", `Bearer ${accessToken}`);
   }
 
   return headers;
+}
+
+function isLogoutPath(path: string[]) {
+  return path.join("/") === "auth/logout";
 }
 
 function rewriteLivePath(path: string[]) {
@@ -77,6 +113,10 @@ function rewriteLivePath(path: string[]) {
 
   if (joinedPath === "security/mfa") {
     return ["auth", "mfa", "methods"];
+  }
+
+  if (joinedPath === "security/password-policy") {
+    return ["auth", "security", "password-policy"];
   }
 
   if (joinedPath === "security/webauthn/options") {
@@ -117,18 +157,14 @@ function buildLiveUrl(path: string[], requestUrl: string) {
   return `${normalizedBaseUrl}/${normalizedPath}${url.search}`;
 }
 
-function getSetCookieHeaders(headers: Headers) {
-  const headersWithCookieList = headers as Headers & {
-    getSetCookie?: () => string[];
-  };
+function copyProxyResponseHeaders(source: Headers, target: NextResponse) {
+  FORWARDED_RESPONSE_HEADERS.forEach((header) => {
+    const value = source.get(header);
 
-  if (typeof headersWithCookieList.getSetCookie === "function") {
-    return headersWithCookieList.getSetCookie();
-  }
-
-  const setCookieHeader = headers.get("set-cookie");
-
-  return setCookieHeader ? [setCookieHeader] : [];
+    if (value) {
+      target.headers.set(header, value);
+    }
+  });
 }
 
 function getErrorMessage(payload: unknown) {
@@ -165,6 +201,36 @@ function isEnvelope(
 
 function unwrapPayload(payload: unknown) {
   return isEnvelope(payload) ? payload.data : payload;
+}
+
+function isPaginatedPayload(
+  payload: unknown,
+): payload is { data: unknown[]; meta: JsonRecord } {
+  return (
+    isRecord(payload) && Array.isArray(payload.data) && isRecord(payload.meta)
+  );
+}
+
+function normalizePaginationMeta(meta: JsonRecord) {
+  const page = Number(meta.page ?? 1);
+  const limit = Number(meta.limit ?? 20);
+  const total = Number(meta.total ?? 0);
+  const totalPages = Math.max(Number(meta.totalPages ?? 1), 1);
+
+  return {
+    page,
+    limit,
+    total,
+    totalPages,
+    hasNextPage:
+      typeof meta.hasNextPage === "boolean"
+        ? meta.hasNextPage
+        : page < totalPages,
+    hasPreviousPage:
+      typeof meta.hasPreviousPage === "boolean"
+        ? meta.hasPreviousPage
+        : page > 1,
+  };
 }
 
 function decodeJwtPayload(token: string) {
@@ -243,11 +309,6 @@ function mapLiveMfaMethods(methods: unknown) {
     .filter((method, index, list) => list.indexOf(method) === index);
 }
 
-const liveCustomerIdsByEmail: Record<string, string> = {
-  "operations@wavenet.ug": "cus-wavenet",
-  "baliksjosay@gmail.com": "cus-baliksjosay",
-};
-
 function mapLiveUser(user: JsonRecord, fallbackId: string) {
   const firstName = typeof user.firstName === "string" ? user.firstName : "";
   const lastName = typeof user.lastName === "string" ? user.lastName : "";
@@ -255,7 +316,9 @@ function mapLiveUser(user: JsonRecord, fallbackId: string) {
   const name = `${firstName} ${lastName}`.trim() || email || "Live user";
   const role = mapLiveRole(user.roles);
   const customerId =
-    role === "customer" ? liveCustomerIdsByEmail[email] : undefined;
+    role === "customer" && typeof user.customerId === "string"
+      ? user.customerId
+      : undefined;
 
   return {
     id: String(user.id ?? fallbackId),
@@ -412,6 +475,12 @@ function setLiveAuthCookies(response: NextResponse, payload: unknown) {
 function mapLivePreferences(payload: unknown): UserPreferences {
   const data = unwrapPayload(payload);
   const record = isRecord(data) ? data : {};
+  const dashboardPreferences = isRecord(record.dashboardPreferences)
+    ? record.dashboardPreferences
+    : {};
+  const quietHours = isRecord(dashboardPreferences.quietHours)
+    ? dashboardPreferences.quietHours
+    : {};
   const theme =
     record.theme === "dark" ||
     record.theme === "light" ||
@@ -419,23 +488,41 @@ function mapLivePreferences(payload: unknown): UserPreferences {
       ? record.theme
       : "system";
   const language = record.language === "lug" ? "lug" : "en";
+  const defaultLanding =
+    dashboardPreferences.defaultLanding === "admin" ||
+    dashboardPreferences.defaultLanding === "customer" ||
+    dashboardPreferences.defaultLanding === "security" ||
+    dashboardPreferences.defaultLanding === "overview"
+      ? dashboardPreferences.defaultLanding
+      : "overview";
+  const dataDensity =
+    dashboardPreferences.dataDensity === "compact" ? "compact" : "comfortable";
+  const quietHoursStart =
+    typeof quietHours.start === "string" &&
+    /^\d{2}:\d{2}$/.test(quietHours.start)
+      ? quietHours.start
+      : "20:00";
+  const quietHoursEnd =
+    typeof quietHours.end === "string" && /^\d{2}:\d{2}$/.test(quietHours.end)
+      ? quietHours.end
+      : "07:00";
 
   return {
     theme,
     language,
     timezone:
       typeof record.timezone === "string" ? record.timezone : "Africa/Kampala",
-    defaultLanding: "overview",
-    dataDensity: "comfortable",
+    defaultLanding,
+    dataDensity,
     quietHours: {
-      enabled: false,
-      start: "20:00",
-      end: "07:00",
+      enabled: quietHours.enabled === true,
+      start: quietHoursStart,
+      end: quietHoursEnd,
     },
     notifications: {
       email: record.emailNotifications !== false,
-      sms: false,
-      whatsapp: false,
+      sms: dashboardPreferences.smsNotifications !== false,
+      whatsapp: dashboardPreferences.whatsappNotifications === true,
       inApp: record.inAppNotifications !== false,
     },
   };
@@ -452,7 +539,7 @@ function mapPreferencesRequest(payload: unknown) {
 
   return {
     theme: payload.theme,
-    language: payload.language,
+    language: "en",
     timezone: payload.timezone,
     emailNotifications: notifications.email,
     pushNotifications: notifications.whatsapp ?? notifications.sms,
@@ -581,6 +668,7 @@ async function createProxyBody(
 
     if (payload.method === "password") {
       const identifier = (
+        payload.identifier ??
         payload.username ??
         payload.email ??
         payload.phoneNumber ??
@@ -589,7 +677,7 @@ async function createProxyBody(
 
       if (!identifier || !payload.password) {
         return fail(
-          "Password login requires username, email, or phone number and password",
+          "Password login requires TIN, phone number, email, or staff username and password",
           422,
         );
       }
@@ -598,29 +686,8 @@ async function createProxyBody(
       return {
         path,
         body: JSON.stringify({
-          username: identifier.includes("@") ? undefined : identifier,
-          email: identifier.includes("@") ? identifier : undefined,
-          phoneNumber: /^\+?\d{9,15}$/.test(identifier)
-            ? identifier
-            : undefined,
+          identifier,
           password: payload.password,
-          deviceId: request.headers.get("x-device-id") ?? undefined,
-        }),
-      };
-    }
-
-    if (payload.method === "otp") {
-      if (!payload.identifier || !payload.otp) {
-        return fail("Customer OTP login requires identifier and OTP code", 422);
-      }
-
-      headers.set("content-type", "application/json");
-      return {
-        path: ["auth", "login", "otp"],
-        body: JSON.stringify({
-          identifier: payload.identifier,
-          identifierKind: payload.identifierKind,
-          otp: payload.otp,
           deviceId: request.headers.get("x-device-id") ?? undefined,
         }),
       };
@@ -666,9 +733,11 @@ function createJsonResponseForLivePath(
 
   if (
     joinedPath === "auth/login" ||
-    joinedPath === "auth/login/otp" ||
+    joinedPath === "auth/login/google" ||
+    joinedPath === "auth/login/microsoft" ||
     joinedPath === "auth/mfa/start-login-challenge" ||
     joinedPath === "auth/mfa/complete-login" ||
+    joinedPath === "auth/activation/password" ||
     joinedPath === "auth/webauthn/authentication/verify"
   ) {
     const result = mapLiveAuthResult(payload, {
@@ -687,11 +756,23 @@ function createJsonResponseForLivePath(
         : "Signed in successfully",
     );
     setLiveAuthCookies(response, payload);
+    if (result.mfaRequired !== true) {
+      setAuthSessionCookie(response, result);
+    }
     return response;
   }
 
   if (joinedPath === "preferences") {
     return ok(mapLivePreferences(payload), "Preferences fetched successfully");
+  }
+
+  if (joinedPath === "auth/logout") {
+    const response = ok(
+      { message: "Logged out successfully" },
+      "Logged out successfully",
+    );
+    clearAllAuthCookies(response);
+    return response;
   }
 
   if (joinedPath === "security/sessions") {
@@ -709,7 +790,21 @@ function createJsonResponseForLivePath(
     return NextResponse.json(payload, { status });
   }
 
-  return ok(unwrapPayload(payload), "Request completed successfully");
+  const unwrappedPayload = unwrapPayload(payload);
+
+  if (isPaginatedPayload(unwrappedPayload)) {
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Records fetched successfully",
+        data: unwrappedPayload.data,
+        meta: normalizePaginationMeta(unwrappedPayload.meta),
+      },
+      { status },
+    );
+  }
+
+  return ok(unwrappedPayload, "Request completed successfully");
 }
 
 async function proxyRequest(request: NextRequest, path: string[]) {
@@ -719,7 +814,7 @@ async function proxyRequest(request: NextRequest, path: string[]) {
 
   try {
     const method = request.method.toUpperCase();
-    const headers = createProxyHeaders(request);
+    const headers = createProxyHeaders(request, path);
     const proxyBody = await createProxyBody(request, path, headers);
 
     if (proxyBody instanceof NextResponse) {
@@ -731,10 +826,16 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     try {
       liveUrl = buildLiveUrl(proxyBody.path, request.url);
     } catch (error) {
-      return fail(
+      const failureResponse = fail(
         error instanceof Error ? error.message : "Live API is not configured",
         500,
       );
+
+      if (isLogoutPath(path)) {
+        clearAllAuthCookies(failureResponse);
+      }
+
+      return failureResponse;
     }
 
     const response = await fetch(liveUrl, {
@@ -770,10 +871,11 @@ async function proxyRequest(request: NextRequest, path: string[]) {
             )
           : fail(getErrorMessage(jsonPayload), response.status);
 
-    getSetCookieHeaders(response.headers).forEach((setCookieHeader) => {
-      proxiedResponse.headers.append("set-cookie", setCookieHeader);
-    });
+    if (response.status === 401 || isLogoutPath(proxyBody.path)) {
+      clearAllAuthCookies(proxiedResponse);
+    }
 
+    copyProxyResponseHeaders(response.headers, proxiedResponse);
     return proxiedResponse;
   } catch (error) {
     const message =
@@ -781,7 +883,13 @@ async function proxyRequest(request: NextRequest, path: string[]) {
         ? "Live API request timed out"
         : "Live API request failed";
 
-    return fail(message, 502);
+    const response = fail(message, 502);
+
+    if (isLogoutPath(path)) {
+      clearAllAuthCookies(response);
+    }
+
+    return response;
   } finally {
     clearTimeout(timeout);
   }

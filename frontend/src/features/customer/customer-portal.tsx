@@ -57,30 +57,39 @@ import type { Customer, ListQuery, SecondaryNumber } from "@/types/domain";
 
 const customerDashboardCardThemes = {
   yellow: {
-    card: "border-yellow-300/70 bg-yellow-100 text-yellow-950 shadow-yellow-100/60 dark:border-yellow-400/35 dark:bg-yellow-950/45 dark:text-yellow-50",
-    label: "text-yellow-950/70 dark:text-yellow-100/75",
-    detail: "text-yellow-950/75 dark:text-yellow-100/80",
-    icon: "bg-yellow-300/85 text-yellow-950 dark:bg-yellow-400/20 dark:text-yellow-100",
+    card: "bg-[linear-gradient(135deg,#fff8db_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(223,169,25,0.16)] dark:bg-[linear-gradient(135deg,rgba(255,215,106,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-yellow-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-yellow-100/75",
+    detail: "text-zinc-500 dark:text-yellow-100/70",
+    icon: "bg-yellow-200/85 text-yellow-900 dark:bg-yellow-300/[0.18] dark:text-yellow-100",
   },
   green: {
-    card: "border-emerald-300/70 bg-emerald-100 text-emerald-950 shadow-emerald-100/60 dark:border-emerald-400/30 dark:bg-emerald-950/45 dark:text-emerald-50",
-    label: "text-emerald-950/70 dark:text-emerald-100/75",
-    detail: "text-emerald-950/75 dark:text-emerald-100/80",
-    icon: "bg-emerald-300/80 text-emerald-950 dark:bg-emerald-400/20 dark:text-emerald-100",
+    card: "bg-[linear-gradient(135deg,#edfff5_0%,#ffffff_58%,#f7fbff_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(67,174,119,0.14)] dark:bg-[linear-gradient(135deg,rgba(142,230,183,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(139,211,247,0.08)_100%)] dark:text-emerald-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-emerald-100/75",
+    detail: "text-zinc-500 dark:text-emerald-100/70",
+    icon: "bg-emerald-100 text-emerald-800 dark:bg-emerald-300/[0.16] dark:text-emerald-100",
   },
   blue: {
-    card: "border-sky-300/70 bg-sky-100 text-sky-950 shadow-sky-100/60 dark:border-sky-400/30 dark:bg-sky-950/45 dark:text-sky-50",
-    label: "text-sky-950/70 dark:text-sky-100/75",
-    detail: "text-sky-950/75 dark:text-sky-100/80",
-    icon: "bg-sky-300/80 text-sky-950 dark:bg-sky-400/20 dark:text-sky-100",
+    card: "bg-[linear-gradient(135deg,#edf8ff_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(77,154,201,0.15)] dark:bg-[linear-gradient(135deg,rgba(139,211,247,0.16)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-sky-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-sky-100/75",
+    detail: "text-zinc-500 dark:text-sky-100/70",
+    icon: "bg-sky-100 text-sky-800 dark:bg-sky-300/[0.16] dark:text-sky-100",
   },
   red: {
-    card: "border-rose-300/70 bg-rose-100 text-rose-950 shadow-rose-100/60 dark:border-rose-400/30 dark:bg-rose-950/45 dark:text-rose-50",
-    label: "text-rose-950/70 dark:text-rose-100/75",
-    detail: "text-rose-950/75 dark:text-rose-100/80",
-    icon: "bg-rose-300/80 text-rose-950 dark:bg-rose-400/20 dark:text-rose-100",
+    card: "bg-[linear-gradient(135deg,#fff0f0_0%,#ffffff_58%,#fff8e8_100%)] text-zinc-900 shadow-[0_18px_42px_rgba(217,111,111,0.14)] dark:bg-[linear-gradient(135deg,rgba(246,162,162,0.15)_0%,rgba(255,255,255,0.05)_64%,rgba(255,215,106,0.08)_100%)] dark:text-rose-50 dark:shadow-black/30",
+    label: "text-zinc-600 dark:text-rose-100/75",
+    detail: "text-zinc-500 dark:text-rose-100/70",
+    icon: "bg-rose-100 text-rose-800 dark:bg-rose-300/[0.16] dark:text-rose-100",
   },
 };
+
+const customerPortalPanelClass =
+  "border-0 bg-white/[0.88] shadow-[0_14px_36px_rgba(18,24,40,0.07)] dark:bg-white/[0.045] dark:shadow-black/25";
+
+const customerPortalStatCardClass =
+  "border-0 shadow-[0_18px_42px_rgba(15,23,42,0.1)] dark:shadow-black/35";
+
+const customerPortalSoftSurfaceClass =
+  "border-0 bg-white/[0.64] shadow-[inset_0_0_0_1px_rgba(15,23,42,0.05)] dark:bg-white/[0.035] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]";
 
 function parseBulkMsisdns(value: string): string[] {
   return [
@@ -179,7 +188,11 @@ export function CustomerPortal() {
   ]);
 
   if (customersQuery.isLoading || bundlesQuery.isLoading) {
-    return <Panel>Loading customer portal...</Panel>;
+    return (
+      <Panel className={customerPortalPanelClass}>
+        Loading customer portal...
+      </Panel>
+    );
   }
 
   if (
@@ -188,11 +201,19 @@ export function CustomerPortal() {
     !customersQuery.data ||
     !bundlesQuery.data
   ) {
-    return <Panel>Customer portal could not be loaded.</Panel>;
+    return (
+      <Panel className={customerPortalPanelClass}>
+        Customer portal could not be loaded.
+      </Panel>
+    );
   }
 
   if (visibleCustomers.length === 0) {
-    return <Panel>No customer account is assigned to this session.</Panel>;
+    return (
+      <Panel className={customerPortalPanelClass}>
+        No customer account is assigned to this session.
+      </Panel>
+    );
   }
 
   return (
@@ -284,9 +305,11 @@ function CustomerAccountsList({
 }) {
   const queryClient = useQueryClient();
   const [copiedMsisdn, setCopiedMsisdn] = useState("");
+  const [primaryMsisdn, setPrimaryMsisdn] = useState(UGANDA_PHONE_COUNTRY_CODE);
   const [drawerPrimaryMsisdn, setDrawerPrimaryMsisdn] = useState("");
   const [msisdn, setMsisdn] = useState(UGANDA_PHONE_COUNTRY_CODE);
   const [bulkMsisdns, setBulkMsisdns] = useState("");
+  const [primaryValidationError, setPrimaryValidationError] = useState("");
   const [singleValidationError, setSingleValidationError] = useState("");
   const [bulkValidationError, setBulkValidationError] = useState("");
 
@@ -319,6 +342,25 @@ function CustomerAccountsList({
       setMsisdn(UGANDA_PHONE_COUNTRY_CODE);
       setDrawerPrimaryMsisdn("");
       await invalidate(variables.primaryMsisdn);
+    },
+  });
+
+  const addPrimaryMutation = useMutation({
+    mutationFn: (nextPrimaryMsisdn: string) =>
+      api.addPrimaryMsisdn(customer.id, {
+        primaryMsisdn: nextPrimaryMsisdn,
+      }),
+    onSuccess: async (result) => {
+      setPrimaryMsisdn(UGANDA_PHONE_COUNTRY_CODE);
+      const nextPrimary = result.customer.primaryMsisdns.at(-1);
+
+      if (nextPrimary) {
+        onSelectPrimary(nextPrimary);
+        await invalidate(nextPrimary);
+        return;
+      }
+
+      await invalidate(selectedPrimaryMsisdn);
     },
   });
 
@@ -362,6 +404,18 @@ function CustomerAccountsList({
     setDrawerPrimaryMsisdn("");
   }
 
+  function submitPrimaryMsisdn() {
+    const normalizedMsisdn = normalizeUgandaPhoneInput(primaryMsisdn);
+
+    if (!isUgandaPhoneNumber(normalizedMsisdn)) {
+      setPrimaryValidationError("Enter a valid MTN Uganda primary number.");
+      return;
+    }
+
+    setPrimaryValidationError("");
+    addPrimaryMutation.mutate(normalizedMsisdn);
+  }
+
   function submitSingleSecondary(primaryMsisdn: string) {
     const normalizedMsisdn = normalizeUgandaPhoneInput(msisdn);
 
@@ -398,7 +452,7 @@ function CustomerAccountsList({
   }
 
   return (
-    <Panel>
+    <Panel className={customerPortalPanelClass}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold">Customer Accounts</h3>
@@ -413,6 +467,50 @@ function CustomerAccountsList({
         />
       </div>
 
+      <form
+        className={cn(
+          "mt-4 grid gap-3 rounded-md p-3 md:grid-cols-[minmax(0,1fr)_auto]",
+          customerPortalSoftSurfaceClass,
+        )}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitPrimaryMsisdn();
+        }}
+      >
+        <PhoneField
+          label="Add primary number"
+          value={primaryMsisdn}
+          onValueChange={(value) => {
+            setPrimaryValidationError("");
+            setPrimaryMsisdn(value);
+          }}
+          required
+        />
+        <div className="flex items-end">
+          <Button
+            type="submit"
+            variant="secondary"
+            disabled={addPrimaryMutation.isPending}
+          >
+            <Plus className="h-4 w-4" />
+            {addPrimaryMutation.isPending ? "Checking..." : "Add Primary"}
+          </Button>
+        </div>
+        {(primaryValidationError || addPrimaryMutation.isError) && (
+          <p className="text-sm font-medium text-coral md:col-span-2">
+            {primaryValidationError ||
+              (addPrimaryMutation.isError
+                ? addPrimaryMutation.error.message
+                : "")}
+          </p>
+        )}
+        {addPrimaryMutation.isSuccess && (
+          <p className="text-sm font-medium text-forest md:col-span-2">
+            Primary number added after APN verification.
+          </p>
+        )}
+      </form>
+
       <div className="mt-4 grid max-h-80 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
         {customer.primaryMsisdns.length > 0 ? (
           customer.primaryMsisdns.map((primaryMsisdn, index) => {
@@ -423,10 +521,10 @@ function CustomerAccountsList({
               <div
                 key={primaryMsisdn}
                 className={cn(
-                  "group flex min-h-14 min-w-0 items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-sm transition-colors focus-within:ring-2 focus-within:ring-ring/40",
+                  "group flex min-h-14 min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-within:ring-2 focus-within:ring-ring/40",
                   selected
-                    ? "border-primary/70 bg-primary/10"
-                    : "surface-table-hover",
+                    ? "bg-primary/10 shadow-[inset_0_0_0_1px_rgba(241,196,15,0.32)] dark:bg-yellow-300/[0.08]"
+                    : "bg-white/[0.58] shadow-[inset_0_0_0_1px_rgba(15,23,42,0.05)] hover:bg-white/[0.78] dark:bg-white/[0.035] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] dark:hover:bg-white/[0.055]",
                 )}
               >
                 <button
@@ -465,7 +563,12 @@ function CustomerAccountsList({
             );
           })
         ) : (
-          <p className="rounded-md border border-border/60 p-3 text-sm text-[var(--muted)]">
+          <p
+            className={cn(
+              "rounded-md p-3 text-sm text-[var(--muted)]",
+              customerPortalSoftSurfaceClass,
+            )}
+          >
             No primary MSISDNs are attached to this customer account.
           </p>
         )}
@@ -569,11 +672,17 @@ function CustomerBalance({
   });
 
   if (balanceQuery.isLoading) {
-    return <Panel>Checking balance...</Panel>;
+    return (
+      <Panel className={customerPortalPanelClass}>Checking balance...</Panel>
+    );
   }
 
   if (balanceQuery.isError || !balanceQuery.data) {
-    return <Panel>Balance could not be loaded.</Panel>;
+    return (
+      <Panel className={customerPortalPanelClass}>
+        Balance could not be loaded.
+      </Panel>
+    );
   }
 
   const balance = balanceQuery.data;
@@ -633,7 +742,7 @@ function CustomerBalance({
         return (
           <Panel
             key={card.label}
-            className={cn("min-h-36 border shadow-sm", theme.card)}
+            className={cn("min-h-36", customerPortalStatCardClass, theme.card)}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -714,7 +823,7 @@ function PurchaseBundle({
 
   if (bundles.length === 0) {
     return (
-      <Panel>
+      <Panel className={customerPortalPanelClass}>
         <h3 className="font-semibold">Buy Bundle</h3>
         <p className="mt-1 text-sm text-[var(--muted)]">
           No visible active packages are currently available for purchase.
@@ -724,7 +833,7 @@ function PurchaseBundle({
   }
 
   return (
-    <Panel>
+    <Panel className={customerPortalPanelClass}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold">Buy Bundle</h3>
@@ -977,7 +1086,7 @@ function SecondaryNumbers({
   }
 
   return (
-    <Panel>
+    <Panel className={customerPortalPanelClass}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold">Secondary Numbers</h3>
@@ -1150,7 +1259,7 @@ function SecondaryNumberDrawer({
   const isPending = singlePending || bulkPending;
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--console-header-height,4rem)] z-50">
       <button
         type="button"
         aria-label="Close add secondary number drawer"
@@ -1190,7 +1299,7 @@ function SecondaryNumberDrawer({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
             <form
-              className="rounded-lg border border-border/60 bg-card p-4"
+              className={cn("rounded-md p-4", customerPortalSoftSurfaceClass)}
               onSubmit={(event) => {
                 event.preventDefault();
                 onSingleSubmit();
@@ -1231,7 +1340,7 @@ function SecondaryNumberDrawer({
             </form>
 
             <form
-              className="rounded-lg border border-border/60 bg-card p-4"
+              className={cn("rounded-md p-4", customerPortalSoftSurfaceClass)}
               onSubmit={(event) => {
                 event.preventDefault();
                 onBulkSubmit();

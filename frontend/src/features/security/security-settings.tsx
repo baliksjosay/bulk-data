@@ -29,9 +29,15 @@ import {
 } from "@/components/ui/table";
 import { Toggle } from "@/components/ui/toggle";
 import { api } from "@/lib/api-client";
+import { useAuthSessionSnapshot } from "@/lib/auth-session";
 import { formatDateTime, sentenceCase } from "@/lib/format";
 import { registerPasskey } from "@/lib/webauthn";
-import type { MfaConfiguration, MfaService, TotpEnrollment } from "@/types/domain";
+import type {
+  MfaConfiguration,
+  MfaService,
+  PasswordPolicyUpdate,
+  TotpEnrollment,
+} from "@/types/domain";
 
 function serviceIcon(serviceId: MfaService["id"]) {
   if (serviceId === "webauthn") {
@@ -50,10 +56,16 @@ const recoveryCodeClassName =
 
 export function SecuritySettings() {
   const queryClient = useQueryClient();
+  const authSession = useAuthSessionSnapshot();
+  const canAccessPasswordPolicy =
+    authSession?.user.role === "admin" || authSession?.user.role === "support";
+  const canUpdatePasswordPolicy = authSession?.user.role === "admin";
   const [passkeyLabel, setPasskeyLabel] = useState("Security key");
   const [totpAppLabel, setTotpAppLabel] = useState("Microsoft Authenticator");
   const [totpCode, setTotpCode] = useState("");
   const [copiedTotpValue, setCopiedTotpValue] = useState("");
+  const [passwordPolicyPatch, setPasswordPolicyPatch] =
+    useState<PasswordPolicyUpdate>({});
   const mfaQuery = useQuery({
     queryKey: ["mfa-configuration"],
     queryFn: api.mfaConfiguration,
@@ -69,6 +81,11 @@ export function SecuritySettings() {
   const sessionsQuery = useQuery({
     queryKey: ["auth-sessions"],
     queryFn: api.authSessions,
+  });
+  const passwordPolicyQuery = useQuery({
+    queryKey: ["password-policy"],
+    queryFn: api.passwordPolicy,
+    enabled: canAccessPasswordPolicy,
   });
 
   const updateMfaMutation = useMutation({
@@ -111,6 +128,17 @@ export function SecuritySettings() {
     },
   });
 
+  const updatePasswordPolicyMutation = useMutation({
+    mutationFn: api.updatePasswordPolicy,
+    onSuccess: async () => {
+      setPasswordPolicyPatch({});
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["password-policy"] }),
+        queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
+      ]);
+    },
+  });
+
   const startTotpMutation = useMutation({
     mutationFn: api.startTotpEnrollment,
     onSuccess: async () => {
@@ -139,7 +167,13 @@ export function SecuritySettings() {
     },
   });
 
-  if (mfaQuery.isLoading || totpAppsQuery.isLoading || devicesQuery.isLoading || sessionsQuery.isLoading) {
+  if (
+    mfaQuery.isLoading ||
+    totpAppsQuery.isLoading ||
+    devicesQuery.isLoading ||
+    sessionsQuery.isLoading ||
+    (canAccessPasswordPolicy && passwordPolicyQuery.isLoading)
+  ) {
     return <Panel>Loading security configuration...</Panel>;
   }
 
@@ -148,6 +182,7 @@ export function SecuritySettings() {
     totpAppsQuery.isError ||
     devicesQuery.isError ||
     sessionsQuery.isError ||
+    (canAccessPasswordPolicy && passwordPolicyQuery.isError) ||
     !mfaQuery.data ||
     !totpAppsQuery.data ||
     !devicesQuery.data ||
@@ -178,6 +213,10 @@ export function SecuritySettings() {
       ...configuration,
       ...patch,
     });
+  }
+
+  function updatePasswordPolicy(patch: PasswordPolicyUpdate) {
+    setPasswordPolicyPatch((current) => ({ ...current, ...patch }));
   }
 
   async function copyTotpValue(value: string, label: string) {
@@ -324,6 +363,220 @@ export function SecuritySettings() {
           )}
         </Panel>
       </div>
+
+      {canAccessPasswordPolicy && passwordPolicyQuery.data && (
+        <Panel className="space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Customer Password Policy</h3>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Applies to customer local-password activation only.
+              </p>
+            </div>
+            <StatusBadge
+              label={passwordPolicyQuery.data.appliesTo.replace("_", " ")}
+              tone="blue"
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <TextField
+              label="Minimum length"
+              type="number"
+              min={8}
+              max={128}
+              value={
+                passwordPolicyPatch.minPasswordLength ??
+                passwordPolicyQuery.data.minPasswordLength
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ minPasswordLength: Number(value) })
+              }
+            />
+            <TextField
+              label="Password history"
+              type="number"
+              min={0}
+              max={50}
+              value={
+                passwordPolicyPatch.passwordHistoryCount ??
+                passwordPolicyQuery.data.passwordHistoryCount
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ passwordHistoryCount: Number(value) })
+              }
+            />
+            <TextField
+              label="Min age days"
+              type="number"
+              min={0}
+              max={30}
+              value={
+                passwordPolicyPatch.minPasswordAgeDays ??
+                passwordPolicyQuery.data.minPasswordAgeDays
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ minPasswordAgeDays: Number(value) })
+              }
+            />
+            <TextField
+              label="Max age days"
+              type="number"
+              min={1}
+              max={730}
+              value={
+                passwordPolicyPatch.maxPasswordAgeWarmBodiedDays ??
+                passwordPolicyQuery.data.maxPasswordAgeWarmBodiedDays
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({
+                  maxPasswordAgeWarmBodiedDays: Number(value),
+                })
+              }
+            />
+            <TextField
+              label="Service account max age"
+              type="number"
+              min={1}
+              max={1095}
+              value={
+                passwordPolicyPatch.maxPasswordAgeServiceAccountDays ??
+                passwordPolicyQuery.data.maxPasswordAgeServiceAccountDays
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({
+                  maxPasswordAgeServiceAccountDays: Number(value),
+                })
+              }
+            />
+            <TextField
+              label="Lockout threshold"
+              type="number"
+              min={1}
+              max={20}
+              value={
+                passwordPolicyPatch.accountLockoutThreshold ??
+                passwordPolicyQuery.data.accountLockoutThreshold
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ accountLockoutThreshold: Number(value) })
+              }
+            />
+            <TextField
+              label="Sessions per user"
+              type="number"
+              min={1}
+              max={20}
+              value={
+                passwordPolicyPatch.maxSessionsPerUser ??
+                passwordPolicyQuery.data.maxSessionsPerUser
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ maxSessionsPerUser: Number(value) })
+              }
+            />
+            <TextField
+              label="Inactive lock days"
+              type="number"
+              min={1}
+              max={730}
+              value={
+                passwordPolicyPatch.inactiveAccountLockDays ??
+                passwordPolicyQuery.data.inactiveAccountLockDays
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ inactiveAccountLockDays: Number(value) })
+              }
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["complexityEnabled", "Complexity"],
+              ["hashingEnabled", "Hashing"],
+              ["forcePasswordChangeAtFirstLogin", "First logon change"],
+              ["mfaSupported", "MFA supported"],
+              ["ssoAllowed", "SSO supported"],
+              ["leastPrivilegeEnabled", "Least privilege"],
+              ["rbacEnabled", "RBAC"],
+            ].map(([key, label]) => {
+              const typedKey = key as keyof PasswordPolicyUpdate;
+              const checked = Boolean(
+                passwordPolicyPatch[typedKey] ??
+                  passwordPolicyQuery.data?.[typedKey],
+              );
+
+              return (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] p-3"
+                >
+                  <span className="text-sm font-medium">{label}</span>
+                  <Toggle
+                    checked={checked}
+                    label={label}
+                    onChange={(value) => {
+                      if (canUpdatePasswordPolicy) {
+                        updatePasswordPolicy({
+                          [key]: value,
+                        } as PasswordPolicyUpdate);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+            <TextField
+              label="PAM provider"
+              value={
+                passwordPolicyPatch.pamProvider ??
+                passwordPolicyQuery.data.pamProvider
+              }
+              disabled={!canUpdatePasswordPolicy}
+              onValueChange={(value) =>
+                updatePasswordPolicy({ pamProvider: value })
+              }
+            />
+            <Button
+              type="button"
+              variant="primary"
+              disabled={
+                !canUpdatePasswordPolicy ||
+                updatePasswordPolicyMutation.isPending ||
+                Object.keys(passwordPolicyPatch).length === 0
+              }
+              onClick={() =>
+                updatePasswordPolicyMutation.mutate(passwordPolicyPatch)
+              }
+            >
+              <Save className="h-4 w-4" />
+              {updatePasswordPolicyMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+
+          {updatePasswordPolicyMutation.isSuccess && (
+            <p className="text-sm font-medium text-forest">
+              Customer password policy saved.
+            </p>
+          )}
+          {updatePasswordPolicyMutation.isError && (
+            <p className="text-sm font-medium text-coral">
+              {updatePasswordPolicyMutation.error.message}
+            </p>
+          )}
+        </Panel>
+      )}
 
       <Panel className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

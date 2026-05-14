@@ -12,7 +12,7 @@ info:
     - Payment initiation must return a pending transaction and payment session that can be tracked globally until confirmation, expiry, or failure.
     - Customer account activation must follow the solution-document flow: activation link, email OTP verification, password creation, activation notification, then immediate portal access.
     - Bundle package validity is fixed at 30 days; configurable bundle fields are service code, name, volume up to 4 TB, price, status, and visibility.
-    - PCRF is abstracted behind Provisioning; public API routes must use provisioning resources while the backend adapter maps to configured upstream PCRF endpoints.
+    - PCRF is abstracted behind the internal Provisioning service; public purchase and renewal workflows must trigger provisioning only after payment confirmation.
 servers:
   - url: https://backend.example.com/api
     description: Live backend base URL
@@ -21,7 +21,6 @@ security:
 tags:
   - name: Auth
   - name: Users
-  - name: Provisioning
   - name: Overview
   - name: Customers
   - name: Bundles
@@ -37,7 +36,7 @@ paths:
     post:
       tags: [Auth]
       summary: Sign in user
-      description: Authenticates customers with phone, email, or TIN OTP; privileged users with username, email, or phone number plus password and MFA; or any enrolled user with WebAuthn/passkeys. The frontend uses promptPasswordlessSetup from the response to decide whether to show the post-login passkey setup prompt after successful login.
+      description: Authenticates customers with TIN, phone number, or email plus password; staff users with AD username / lanId plus password and MFA after their internal account has been pre-created; or enrolled users with WebAuthn/passkeys. OTP is reserved for activation and MFA challenges, not direct sign-in. The frontend uses promptPasswordlessSetup from the response to decide whether to show the post-login passkey setup prompt after successful login.
       security: []
       requestBody:
         required: true
@@ -47,25 +46,11 @@ paths:
               $ref: "#/components/schemas/AuthLoginRequest"
             examples:
               accountPassword:
-                summary: Privileged username, email, or phone password login
+                summary: Password login
                 value:
                   method: password
-                  username: jbalikuddembe
-                  password: "********"
-              otp:
-                summary: OTP verification login
-                value:
-                  method: otp
-                  identifier: "+256772991001"
-                  identifierKind: phone
-                  otp: "12345"
-              tinOtp:
-                summary: TIN OTP verification login
-                value:
-                  method: otp
                   identifier: "1000172796"
-                  identifierKind: tin
-                  otp: "12345"
+                  password: "********"
               passkey:
                 summary: Passkey login
                 value:
@@ -95,7 +80,7 @@ paths:
     post:
       tags: [Users]
       summary: Create admin or support user
-      description: Allows an authenticated administrator to create another admin or support user by submitting phoneNumber, email, lanId, and role.
+      description: Allows an authenticated administrator to create another admin or support user by submitting email, optional phoneNumber, optional lanId (the AD username, for example balikujo), and role.
       requestBody:
         required: true
         content:
@@ -108,7 +93,7 @@ paths:
                 value:
                   phoneNumber: "+256789172796"
                   email: support.agent@example.com
-                  lanId: support.agent
+                  lanId: balikujo
                   role: SUPPORT
       responses:
         "201":
@@ -203,149 +188,6 @@ paths:
         "400":
           $ref: "#/components/responses/ErrorResponse"
         "422":
-          $ref: "#/components/responses/ErrorResponse"
-  /provisioning/group-member:
-    post:
-      tags: [Provisioning]
-      summary: Add Provisioning group member
-      description: Privileged Provisioning operation that adds a secondary MSISDN under a primary subscription. Admin and support roles only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisioningAddGroupMemberRequest"
-      responses:
-        "200":
-          description: Group member request accepted by Provisioning
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisioningAddGroupMemberResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
-        "422":
-          $ref: "#/components/responses/ErrorResponse"
-        "502":
-          $ref: "#/components/responses/ErrorResponse"
-        "503":
-          $ref: "#/components/responses/ErrorResponse"
-  /provisioning/group-members/bulk:
-    post:
-      tags: [Provisioning]
-      summary: Bulk add Provisioning group members
-      description: Privileged Provisioning operation that adds multiple secondary MSISDNs in one provider request. Admin and support roles only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkRequest"
-      responses:
-        "200":
-          description: Bulk group-member request accepted by Provisioning
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
-        "422":
-          $ref: "#/components/responses/ErrorResponse"
-        "502":
-          $ref: "#/components/responses/ErrorResponse"
-        "503":
-          $ref: "#/components/responses/ErrorResponse"
-  /provisioning/group-member/delete:
-    post:
-      tags: [Provisioning]
-      summary: Delete Provisioning group member
-      description: Privileged Provisioning operation that removes a secondary MSISDN from a grouped subscription. Admin and support roles only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberRequest"
-      responses:
-        "200":
-          description: Group member delete request accepted by Provisioning
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisioningDeleteGroupMemberResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
-        "422":
-          $ref: "#/components/responses/ErrorResponse"
-        "502":
-          $ref: "#/components/responses/ErrorResponse"
-        "503":
-          $ref: "#/components/responses/ErrorResponse"
-  /provisioning/subscriptions/update:
-    post:
-      tags: [Provisioning]
-      summary: Update Provisioning subscription
-      description: Privileged Provisioning operation used after successful payment to apply additional provisioning/top-up attempts. Admin and support roles only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionRequest"
-      responses:
-        "200":
-          description: Subscription update request accepted by Provisioning
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisioningUpdateSubscriptionResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
-        "422":
-          $ref: "#/components/responses/ErrorResponse"
-        "502":
-          $ref: "#/components/responses/ErrorResponse"
-        "503":
-          $ref: "#/components/responses/ErrorResponse"
-  /provisioning/subscriber:
-    post:
-      tags: [Provisioning]
-      summary: Add Provisioning subscriber
-      description: Privileged Provisioning operation that registers a primary subscriber. PCRF remains abstracted behind the backend adapter and is not exposed as a public API resource. Admin and support roles only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisioningAddSubscriberRequest"
-            example:
-              msisdn: "256779999707"
-              transactionId: "78954566743"
-      responses:
-        "200":
-          description: Subscriber request accepted by Provisioning
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisioningAddSubscriberResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
-        "422":
-          $ref: "#/components/responses/ErrorResponse"
-        "502":
-          $ref: "#/components/responses/ErrorResponse"
-        "503":
           $ref: "#/components/responses/ErrorResponse"
   /overview:
     get:
@@ -641,7 +483,7 @@ paths:
     delete:
       tags: [Secondary Numbers]
       summary: Remove secondary number
-      description: Sends deleteGroupMember to Provisioning and removes the local secondary-number flag.
+      description: Allows the customer or an admin to remove an active secondary number from the group at any time. The API sends deleteGroupMember through the internal Provisioning service before marking the local secondary-number flag as removed.
       responses:
         "200":
           description: Secondary number removed
@@ -785,7 +627,7 @@ paths:
     post:
       tags: [Purchases]
       summary: Initiate bundle payment
-      description: Creates a pending transaction and payment session. Mobile money payments use the configured MoMo provider; when SP transfer mode is enabled, the API posts FromFri, ToFri, Amount, Currency, ExternalTransactionId, and ReferenceId to ECW /sptransfer/ and waits for the asynchronous provider callback. Airtime payments use the update-balance-and-date integration at the configured 9040 base URL with originTimeStamp, originTransactionID, subscriberNumber, and a negative adjustmentAmountRelative, then wait for the asynchronous deduction callback. PRN payments call the configured Generate PRN provider endpoint with customerMsisdn, customerName, productCode, productName, amount, payingCurrency, transactionId, and additionalInfo, then return the provider paymentReference as the PRN while waiting for the paid callback; card payments initiate the configured card provider and return paymentUrl for frontend popup checkout. PCRF is called only after customer payment is confirmed, using the internal Provisioning subscribe-service adapter with msisdn, serviceCode, startDateTime, endDateTime, and transactionId. Subscribe timestamps use yyyy-MM-ddTHH:mm:ss. The frontend subscribes to the returned Socket.IO room/event for provider confirmation before provisioning.
+      description: Creates a pending transaction and payment session. Mobile money payments use the configured ECW URL; when SP transfer mode is enabled, the API posts FromFri as the customer paying number, ToFri as the OVA account, Amount, Currency, ExternalTransactionId, and ReferenceId to /sptransfer/ and waits for the asynchronous provider callback. Airtime payments use the update-balance-and-date endpoint at the configured bulk-data base URL with originTimeStamp, originTransactionID, subscriberNumber, and adjustmentAmountRelative, then wait for the asynchronous deduction callback. PRN payments call the Generate PRN endpoint at the same bulk-data base URL with customerMsisdn, customerName, productCode, productName, amount, payingCurrency, transactionId, and additionalInfo, then return the provider paymentReference as the PRN while waiting for the paid callback; card payments initiate the configured card endpoint and return paymentUrl for frontend popup checkout. PCRF is called only after customer payment is confirmed, using the internal Provisioning subscribe-service adapter with msisdn, serviceCode, startDateTime, endDateTime, and transactionId. Subscribe timestamps use yyyyMMddHHmmss. The frontend subscribes to the returned Socket.IO room/event for provider confirmation before provisioning.
       requestBody:
         required: true
         content:
@@ -2114,6 +1956,7 @@ components:
       value:
         businessName: Kampala Fiber Hub
         registrationNumber: UG-BR-90321
+        tin: "1000172796"
         businessEmail: operations@kampalafiber.ug
         businessPhone: "+256772441120"
         contactPerson: Grace Nansubuga
@@ -2143,6 +1986,7 @@ components:
             id: cus-kfh
             businessName: Kampala Fiber Hub
             registrationNumber: UG-BR-90321
+            tin: "1000172796"
             businessEmail: operations@kampalafiber.ug
             businessPhone: "+256772441120"
             contactPerson: Grace Nansubuga
@@ -2163,6 +2007,11 @@ components:
             apnIds: [APN-2201]
             registeredApnId: APN-2201
             provisioningAction: addSubscriber
+          activation:
+            activationToken: act_demo
+            activationUrl: /auth/activate?token=act_demo
+            expiresAt: "2026-04-23T10:00:00+03:00"
+            deliveryChannels: [contact_email, contact_phone]
     OverviewResponseExample:
       summary: Dashboard overview
       value:
@@ -2583,30 +2432,21 @@ components:
       properties:
         method:
           type: string
-          enum: [otp, password, passkey]
+          enum: [password, passkey]
           description: Login method selected by the user.
         identifier:
           type: string
-          description: Phone number, email address, or TIN for OTP login.
-          example: "+256772991001"
-        identifierKind:
-          type: string
-          enum: [phone, email, tin]
-          description: Normalized identifier type supplied by the frontend for OTP login.
-        otp:
-          type: string
-          pattern: "^\\d{5}$"
-          description: Five-digit OTP code for customer OTP login.
-          example: "12345"
+          description: Password-login identifier. Customers may use TIN, phone number, or email; staff users must use their AD username / lanId.
+          example: balikujo
         email:
           type: string
           format: email
-          description: Email address for password login.
+          description: Customer email address for password login. Staff users must use username / lanId instead.
           example: joseph.balikuddembe@example.com
         username:
           type: string
-          description: Username for password login.
-          example: jbalikuddembe
+          description: AD username / lanId for staff password login.
+          example: balikujo
         phoneNumber:
           type: string
           description: Phone number for password login.
@@ -2697,7 +2537,7 @@ components:
           description: Present when the signed-in user is linked to a customer account.
     StaffUserCreateRequest:
       type: object
-      required: [phoneNumber, email, lanId, role]
+      required: [email]
       properties:
         phoneNumber:
           type: string
@@ -2710,9 +2550,9 @@ components:
           example: support.agent@example.com
         lanId:
           type: string
-          description: Corporate login identifier for the user.
+          description: Optional AD username for the user, for example balikujo. When omitted, it is completed from Active Directory on first successful login.
           pattern: "^[A-Za-z0-9._-]+$"
-          example: support.agent
+          example: balikujo
         role:
           type: string
           enum: [ADMIN, SUPPORT]
@@ -2861,74 +2701,9 @@ components:
       description: E.164 Uganda phone/MSISDN. Must start with +256 followed by 77, 78, 79, 76, or 39 and 7 digits.
       pattern: "^\\+256(77|78|79|76|39)\\d{7}$"
       example: "+256772990001"
-    ProvisioningNormalizedMsisdn:
-      type: string
-      description: Provisioning-normalized Uganda MTN MSISDN without the leading plus sign.
-      pattern: "^256(77|78|79|76|39)\\d{7}$"
-      example: "256772990001"
-    ProvisioningGroupMemberPair:
-      type: object
-      required: [secondaryMsisdn, primaryMsisdn]
-      properties:
-        secondaryMsisdn:
-          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
-        primaryMsisdn:
-          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
-    ProvisioningAddGroupMemberRequest:
-      $ref: "#/components/schemas/ProvisioningGroupMemberPair"
-    ProvisioningAddGroupMembersBulkRequest:
-      type: object
-      required: [groupMembers]
-      properties:
-        groupMembers:
-          type: array
-          minItems: 1
-          maxItems: 500
-          items:
-            $ref: "#/components/schemas/ProvisioningGroupMemberPair"
-    ProvisioningDeleteGroupMemberRequest:
-      type: object
-      required: [secondaryMsisdn]
-      properties:
-        secondaryMsisdn:
-          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
-    ProvisioningUpdateSubscriptionRequest:
-      type: object
-      required:
-        - primaryMsisdn
-        - serviceCode
-        - transactionId
-        - topupValue
-        - updateAttemptCount
-      properties:
-        primaryMsisdn:
-          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
-        serviceCode:
-          type: string
-          example: DATA_BUNDLE_CODE
-        transactionId:
-          type: string
-          example: "567123456"
-        topupValue:
-          type: integer
-          minimum: 1
-          description: Top-up volume in kilobytes (KB). Purchase workflows must convert bundle volume to KB before calling this endpoint.
-          example: 1024
-        updateAttemptCount:
-          type: integer
-          minimum: 0
-          example: 4
-    ProvisioningAddSubscriberRequest:
-      type: object
-      required: [msisdn, transactionId]
-      properties:
-        msisdn:
-          $ref: "#/components/schemas/ProvisioningNormalizedMsisdn"
-        transactionId:
-          type: string
-          example: "78954566743"
     ProvisioningCommandResult:
       type: object
+      description: Internal provisioning adapter result returned from payment confirmation flows only. Manual provisioning is not exposed as a public/admin API.
       required:
         [
           requestId,
@@ -2970,41 +2745,6 @@ components:
             successful: true
             resultCode: "0"
             message: Operation succeeded
-    ProvisioningAddGroupMemberResult:
-      allOf:
-        - $ref: "#/components/schemas/ProvisioningCommandResult"
-        - type: object
-          properties:
-            request:
-              $ref: "#/components/schemas/ProvisioningAddGroupMemberRequest"
-    ProvisioningAddGroupMembersBulkResult:
-      allOf:
-        - $ref: "#/components/schemas/ProvisioningCommandResult"
-        - type: object
-          properties:
-            request:
-              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkRequest"
-    ProvisioningDeleteGroupMemberResult:
-      allOf:
-        - $ref: "#/components/schemas/ProvisioningCommandResult"
-        - type: object
-          properties:
-            request:
-              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberRequest"
-    ProvisioningUpdateSubscriptionResult:
-      allOf:
-        - $ref: "#/components/schemas/ProvisioningCommandResult"
-        - type: object
-          properties:
-            request:
-              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionRequest"
-    ProvisioningAddSubscriberResult:
-      allOf:
-        - $ref: "#/components/schemas/ProvisioningCommandResult"
-        - type: object
-          properties:
-            request:
-              $ref: "#/components/schemas/ProvisioningAddSubscriberRequest"
     Customer:
       type: object
       required:
@@ -3069,7 +2809,6 @@ components:
       type: object
       required:
         - businessName
-        - registrationNumber
         - businessEmail
         - businessPhone
         - contactPerson
@@ -3077,12 +2816,15 @@ components:
         - contactPhone
         - apnName
         - apnId
-        - primaryMsisdn
       properties:
         businessName:
           type: string
         registrationNumber:
           type: string
+          description: Optional legacy customer registration reference. If omitted, the system generates an account reference.
+        tin:
+          type: string
+          description: Optional customer TIN.
         businessEmail:
           type: string
           format: email
@@ -3118,7 +2860,7 @@ components:
           type: array
           items:
             type: string
-            enum: [business_email, contact_email]
+            enum: [business_email, contact_email, contact_phone]
     CustomerUpdateRequest:
       type: object
       properties:
@@ -4323,41 +4065,6 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/AccountActivationOtpVerificationResult"
-    ProvisioningAddGroupMemberResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ProvisioningAddGroupMemberResult"
-    ProvisioningAddGroupMembersBulkResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ProvisioningAddGroupMembersBulkResult"
-    ProvisioningDeleteGroupMemberResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ProvisioningDeleteGroupMemberResult"
-    ProvisioningUpdateSubscriptionResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ProvisioningUpdateSubscriptionResult"
-    ProvisioningAddSubscriberResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ProvisioningAddSubscriberResult"
     CustomerListResponse:
       allOf:
         - $ref: "#/components/schemas/ApiEnvelope"
@@ -4374,7 +4081,7 @@ components:
           properties:
             data:
               type: object
-              required: [customer, validation, activation]
+              required: [customer]
               properties:
                 customer:
                   $ref: "#/components/schemas/Customer"
@@ -4408,7 +4115,7 @@ components:
           properties:
             data:
               type: object
-              required: [serviceRequest, customer, validation]
+              required: [serviceRequest, customer]
               properties:
                 serviceRequest:
                   $ref: "#/components/schemas/ServiceRequest"
@@ -4416,6 +4123,10 @@ components:
                   $ref: "#/components/schemas/Customer"
                 validation:
                   $ref: "#/components/schemas/MsisdnValidationResult"
+                activation:
+                  $ref: "#/components/schemas/CustomerActivationNotice"
+                portalUserId:
+                  type: string
     PrimaryMsisdnResponse:
       $ref: "#/components/schemas/CustomerRegistrationResponse"
     BundleListResponse:

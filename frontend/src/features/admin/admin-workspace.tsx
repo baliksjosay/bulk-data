@@ -12,7 +12,9 @@ import {
   Save,
   ShieldOff,
   ShieldCheck,
+  Trash2,
   X,
+  Users,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -42,8 +44,6 @@ import { PhoneField, SelectField, TextField } from "@/components/ui/form-field";
 import { Panel } from "@/components/ui/panel";
 import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { ProvisioningOperationsPanel } from "@/features/admin/provisioning-operations-panel";
-import { StaffUserManagementPanel } from "@/features/admin/staff-user-management-panel";
 import { api } from "@/lib/api-client";
 import { formatDateTime, formatUgx, sentenceCase } from "@/lib/format";
 import { showPrimaryBalance } from "@/lib/table-actions";
@@ -51,14 +51,17 @@ import { useUiStore } from "@/store/ui-store";
 import type {
   AuthRole,
   Customer,
+  CustomerRegistrationResult,
   CustomerRegistrationRequest,
   CustomerUpdateRequest,
   ListQuery,
+  SecondaryNumber,
 } from "@/types/domain";
 
 const emptyRegistrationForm: CustomerRegistrationRequest = {
   businessName: "",
   registrationNumber: "",
+  tin: "",
   businessEmail: "",
   businessPhone: "+256",
   contactPerson: "",
@@ -66,7 +69,7 @@ const emptyRegistrationForm: CustomerRegistrationRequest = {
   contactPhone: "+256",
   apnName: "",
   apnId: "",
-  primaryMsisdn: "+256",
+  primaryMsisdn: "",
 };
 
 function statusTone(status: Customer["status"]) {
@@ -82,10 +85,6 @@ function statusTone(status: Customer["status"]) {
 }
 
 export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
-  const customersQuery = useQuery({
-    queryKey: ["customers"],
-    queryFn: api.customers,
-  });
   const [customerTableFilters, setCustomerTableFilters] = useState<ListQuery>({
     page: 1,
     limit: 10,
@@ -102,15 +101,23 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [drawerMode, setDrawerMode] = useState<"create" | "edit" | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
-  const selectedCustomer = useMemo(() => {
+  const canManageCustomers = currentRole === "admin";
+  const selectedCustomerFromTable = useMemo(() => {
     if (!selectedCustomerId) {
       return undefined;
     }
 
-    return customersQuery.data?.find(
+    return customersTableQuery.data?.data.find(
       (customer) => customer.id === selectedCustomerId,
     );
-  }, [customersQuery.data, selectedCustomerId]);
+  }, [customersTableQuery.data?.data, selectedCustomerId]);
+  const selectedCustomerQuery = useQuery({
+    queryKey: ["customer", selectedCustomerId],
+    queryFn: () => api.customer(selectedCustomerId),
+    enabled: Boolean(selectedCustomerId),
+  });
+  const selectedCustomer =
+    selectedCustomerQuery.data ?? selectedCustomerFromTable;
   const closeDrawer = () => {
     setDrawerMode(null);
     setSelectedCustomerId("");
@@ -187,17 +194,21 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
   ];
   const customerRowActions: Array<DataTableRowAction<Customer>> = [
     {
-      id: "view-account",
-      label: "View account",
+      id: "view-customer",
+      label: "View customer",
       icon: Eye,
       onSelect: openAccountDetails,
     },
-    {
-      id: "edit-account",
-      label: "Edit account",
-      icon: Pencil,
-      onSelect: openEditDrawer,
-    },
+    ...(canManageCustomers
+      ? [
+          {
+            id: "manage-customer",
+            label: "Manage customer",
+            icon: Pencil,
+            onSelect: openEditDrawer,
+          },
+        ]
+      : []),
     {
       id: "check-primary-balance",
       label: "Check balance",
@@ -221,36 +232,34 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
     }));
   }
 
-  if (customersQuery.isLoading) {
-    return <Panel>Loading accounts...</Panel>;
-  }
-
-  if (customersQuery.isError || !customersQuery.data) {
-    return <Panel>Accounts could not be loaded.</Panel>;
+  if (customersTableQuery.isError) {
+    return <Panel>Customers could not be loaded.</Panel>;
   }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold">Accounts</h2>
+          <h2 className="text-2xl font-semibold">Customers</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
             Register customers, validate primary MSISDNs, and manage account
             status.
           </p>
         </div>
-        <Button
-          type="button"
-          variant="primary"
-          onClick={() => setDrawerMode("create")}
-        >
-          <Plus className="h-4 w-4" />
-          Create Account
-        </Button>
+        {canManageCustomers && (
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => setDrawerMode("create")}
+          >
+            <Plus className="h-4 w-4" />
+            Create Customer
+          </Button>
+        )}
       </div>
 
       <Panel>
-        <h3 className="font-semibold">Customer Accounts</h3>
+        <h3 className="font-semibold">Customer List</h3>
         <div className="mt-4">
           <DataTable
             columns={customerColumns}
@@ -327,22 +336,21 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
         </div>
       </Panel>
 
-      {currentRole === "admin" && <StaffUserManagementPanel />}
-
-      <ProvisioningOperationsPanel />
-
       <AccountDrawer
         open={drawerMode !== null}
-        title={drawerMode === "create" ? "Create Account" : "Edit Account"}
+        title={drawerMode === "create" ? "Create Customer" : "Manage Customer"}
         description={
           drawerMode === "create"
             ? "Add customer details, APN mapping, and primary MSISDN."
-            : "Update account details, primary MSISDNs, and account status."
+            : "Update customer details, primary MSISDNs, and account status."
         }
         onClose={closeDrawer}
       >
         {drawerMode === "create" && (
-          <CustomerRegistrationForm onRegistered={closeDrawer} />
+          <CustomerRegistrationForm
+            key="create-customer"
+            onRegistered={closeDrawer}
+          />
         )}
         {drawerMode === "edit" && selectedCustomer && (
           <CustomerAdminDetail
@@ -350,13 +358,21 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
             customer={selectedCustomer}
           />
         )}
-        {drawerMode === "edit" && !selectedCustomer && (
-          <Panel>Selected account could not be loaded.</Panel>
-        )}
+        {drawerMode === "edit" &&
+          !selectedCustomer &&
+          selectedCustomerQuery.isLoading && (
+            <Panel>Loading selected customer...</Panel>
+          )}
+        {drawerMode === "edit" &&
+          !selectedCustomer &&
+          !selectedCustomerQuery.isLoading && (
+            <Panel>Selected customer could not be loaded.</Panel>
+          )}
       </AccountDrawer>
 
       <AccountDetailsDialog
         customer={viewingCustomer}
+        canManage={canManageCustomers}
         open={Boolean(viewingCustomer)}
         onOpenChange={(open) => {
           if (!open) {
@@ -371,6 +387,16 @@ export function AdminWorkspace({ currentRole }: { currentRole: AuthRole }) {
           setViewingCustomer((current) =>
             current && current.id === customerId
               ? { ...current, secondaryCount: current.secondaryCount + 1 }
+              : current,
+          );
+        }}
+        onSecondaryRemoved={(customerId) => {
+          setViewingCustomer((current) =>
+            current && current.id === customerId
+              ? {
+                  ...current,
+                  secondaryCount: Math.max(current.secondaryCount - 1, 0),
+                }
               : current,
           );
         }}
@@ -401,16 +427,20 @@ function PrimaryMsisdnSummary({ msisdns }: { msisdns: string[] }) {
 
 function AccountDetailsDialog({
   customer,
+  canManage,
   open,
   onOpenChange,
   onEdit,
   onSecondaryAdded,
+  onSecondaryRemoved,
 }: {
   customer: Customer | null;
+  canManage: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEdit: (customer: Customer) => void;
   onSecondaryAdded: (customerId: string) => void;
+  onSecondaryRemoved: (customerId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const setSelectedCustomerContext = useUiStore(
@@ -418,6 +448,8 @@ function AccountDetailsDialog({
   );
   const [copiedMsisdn, setCopiedMsisdn] = useState("");
   const [selectedPrimaryMsisdn, setSelectedPrimaryMsisdn] = useState("");
+  const [selectedPrimaryForSecondaries, setSelectedPrimaryForSecondaries] =
+    useState("");
   const [secondaryMsisdn, setSecondaryMsisdn] = useState("+256");
   const addSecondaryMutation = useMutation({
     mutationFn: () => {
@@ -440,6 +472,7 @@ function AccountDetailsDialog({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["customers"] }),
         queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer", customer.id] }),
         queryClient.invalidateQueries({
           queryKey: ["secondary-numbers", customer.id],
         }),
@@ -470,10 +503,19 @@ function AccountDetailsDialog({
   }
 
   function openSecondaryDrawer(msisdn: string) {
+    if (!canManage) {
+      return;
+    }
+
     addSecondaryMutation.reset();
     setSelectedCustomerContext(activeCustomer.id, msisdn);
     setSecondaryMsisdn("+256");
     setSelectedPrimaryMsisdn(msisdn);
+  }
+
+  function openSecondaryList(msisdn: string) {
+    setSelectedCustomerContext(activeCustomer.id, msisdn);
+    setSelectedPrimaryForSecondaries(msisdn);
   }
 
   function selectPrimaryMsisdn(msisdn: string) {
@@ -533,9 +575,12 @@ function AccountDetailsDialog({
                   value={customer.businessName}
                 />
                 <AccountDetailItem
-                  label="Registration number"
+                  label="Account reference"
                   value={customer.registrationNumber}
                 />
+                {customer.tin && (
+                  <AccountDetailItem label="TIN" value={customer.tin} />
+                )}
                 <AccountDetailItem
                   label="Business email"
                   value={customer.businessEmail}
@@ -642,7 +687,11 @@ function AccountDetailsDialog({
                           )}
                           <PrimaryMsisdnActions
                             msisdn={msisdn}
+                            canManage={canManage}
                             onAddSecondary={() => openSecondaryDrawer(msisdn)}
+                            onManageSecondaries={() =>
+                              openSecondaryList(msisdn)
+                            }
                             onCheckBalance={() => {
                               selectPrimaryMsisdn(msisdn);
                               void showPrimaryBalance(customer.id, msisdn);
@@ -670,31 +719,44 @@ function AccountDetailsDialog({
           >
             Close
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => onEdit(customer)}
-          >
-            <Pencil />
-            Edit Account
-          </Button>
+          {canManage && (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => onEdit(customer)}
+            >
+              <Pencil />
+              Manage Customer
+            </Button>
+          )}
         </DialogFooter>
 
-        <AddSecondaryFromPrimaryDrawer
-          open={Boolean(selectedPrimaryMsisdn)}
-          customerName={customer.businessName}
-          primaryMsisdn={selectedPrimaryMsisdn}
-          secondaryMsisdn={secondaryMsisdn}
-          onSecondaryMsisdnChange={setSecondaryMsisdn}
-          onClose={closeSecondaryDrawer}
-          onSubmit={() => addSecondaryMutation.mutate()}
-          isPending={addSecondaryMutation.isPending}
-          errorMessage={
-            addSecondaryMutation.isError
-              ? addSecondaryMutation.error.message
-              : ""
-          }
-        />
+        {canManage && (
+          <AddSecondaryFromPrimaryDrawer
+            open={Boolean(selectedPrimaryMsisdn)}
+            customerName={customer.businessName}
+            primaryMsisdn={selectedPrimaryMsisdn}
+            secondaryMsisdn={secondaryMsisdn}
+            onSecondaryMsisdnChange={setSecondaryMsisdn}
+            onClose={closeSecondaryDrawer}
+            onSubmit={() => addSecondaryMutation.mutate()}
+            isPending={addSecondaryMutation.isPending}
+            errorMessage={
+              addSecondaryMutation.isError
+                ? addSecondaryMutation.error.message
+                : ""
+            }
+          />
+        )}
+        {canManage && (
+          <ManageSecondaryNumbersDrawer
+            open={Boolean(selectedPrimaryForSecondaries)}
+            customer={customer}
+            primaryMsisdn={selectedPrimaryForSecondaries}
+            onClose={() => setSelectedPrimaryForSecondaries("")}
+            onRemoved={onSecondaryRemoved}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -702,11 +764,15 @@ function AccountDetailsDialog({
 
 function PrimaryMsisdnActions({
   msisdn,
+  canManage,
   onAddSecondary,
+  onManageSecondaries,
   onCheckBalance,
 }: {
   msisdn: string;
+  canManage: boolean;
   onAddSecondary: () => void;
+  onManageSecondaries: () => void;
   onCheckBalance: () => void;
 }) {
   return (
@@ -726,10 +792,18 @@ function PrimaryMsisdnActions({
         <DropdownMenuLabel>Primary actions</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={onAddSecondary}>
-            <Plus className="h-4 w-4" />
-            Add secondary number
-          </DropdownMenuItem>
+          {canManage && (
+            <DropdownMenuItem onSelect={onAddSecondary}>
+              <Plus className="h-4 w-4" />
+              Add secondary number
+            </DropdownMenuItem>
+          )}
+          {canManage && (
+            <DropdownMenuItem onSelect={onManageSecondaries}>
+              <Users className="h-4 w-4" />
+              Manage secondary numbers
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={onCheckBalance}>
             <Activity className="h-4 w-4" />
             Check balance
@@ -737,6 +811,150 @@ function PrimaryMsisdnActions({
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function ManageSecondaryNumbersDrawer({
+  open,
+  customer,
+  primaryMsisdn,
+  onClose,
+  onRemoved,
+}: {
+  open: boolean;
+  customer: Customer;
+  primaryMsisdn: string;
+  onClose: () => void;
+  onRemoved: (customerId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ["secondary-numbers", customer.id, primaryMsisdn, "admin"],
+    queryFn: () =>
+      api.secondaryNumbersPage(customer.id, primaryMsisdn, {
+        page: 1,
+        limit: 50,
+        search: "",
+        status: "",
+        dateFrom: "",
+        dateTo: "",
+      }),
+    enabled: open && Boolean(primaryMsisdn),
+  });
+  const removeMutation = useMutation({
+    mutationFn: (secondaryMsisdn: string) =>
+      api.removeSecondaryNumber(customer.id, primaryMsisdn, secondaryMsisdn),
+    onSuccess: async () => {
+      onRemoved(customer.id);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["secondary-numbers", customer.id, primaryMsisdn],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["secondary-numbers", customer.id, primaryMsisdn, "admin"],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["customers"] }),
+        queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer", customer.id] }),
+        queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
+      ]);
+    },
+  });
+  const columns: Array<DataTableColumn<SecondaryNumber>> = [
+    {
+      id: "msisdn",
+      header: "Secondary MSISDN",
+      exportValue: (secondaryNumber) => secondaryNumber.msisdn,
+      cell: (secondaryNumber) => (
+        <span className="font-medium">{secondaryNumber.msisdn}</span>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      exportValue: (secondaryNumber) => sentenceCase(secondaryNumber.status),
+      cell: (secondaryNumber) => (
+        <StatusBadge
+          label={sentenceCase(secondaryNumber.status)}
+          tone={secondaryNumber.status === "active" ? "green" : "red"}
+        />
+      ),
+    },
+    {
+      id: "addedAt",
+      header: "Added",
+      exportValue: (secondaryNumber) => formatDateTime(secondaryNumber.addedAt),
+      cell: (secondaryNumber) => formatDateTime(secondaryNumber.addedAt),
+    },
+  ];
+  const rowActions: Array<DataTableRowAction<SecondaryNumber>> = [
+    {
+      id: "remove-secondary",
+      label: "Remove from group",
+      icon: Trash2,
+      variant: "destructive",
+      disabled: (secondaryNumber) =>
+        secondaryNumber.status !== "active" || removeMutation.isPending,
+      onSelect: (secondaryNumber) =>
+        removeMutation.mutate(secondaryNumber.msisdn),
+    },
+  ];
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 top-[var(--console-header-height,4rem)] z-[70]">
+      <button
+        type="button"
+        aria-label="Close secondary number management drawer"
+        className="absolute inset-0 bg-ink/35 dark:bg-black/60"
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manage-secondary-title"
+        className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-[var(--border)] bg-[var(--background)] shadow-2xl sm:w-[min(92vw,44rem)]"
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-4 py-4">
+          <div className="min-w-0">
+            <h2 id="manage-secondary-title" className="text-lg font-semibold">
+              Secondary Numbers
+            </h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {customer.businessName} / {primaryMsisdn}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <DataTable
+            columns={columns}
+            rows={query.data?.data ?? []}
+            getRowKey={(secondaryNumber) => secondaryNumber.id}
+            minWidth={640}
+            isLoading={query.isLoading}
+            emptyMessage="No secondary numbers found for this primary MSISDN."
+            rowActions={rowActions}
+          />
+          {removeMutation.isError && (
+            <p className="mt-3 text-sm font-medium text-coral">
+              {removeMutation.error.message}
+            </p>
+          )}
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -766,7 +984,7 @@ function AddSecondaryFromPrimaryDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--console-header-height,4rem)] z-[60]">
       <button
         type="button"
         aria-label="Close add secondary number drawer"
@@ -902,7 +1120,7 @@ function AccountDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--console-header-height,4rem)] z-50">
       <button
         type="button"
         aria-label="Close account drawer"
@@ -940,16 +1158,29 @@ function AccountDrawer({
 
 function CustomerRegistrationForm({
   onRegistered,
+  initialForm = emptyRegistrationForm,
+  submitCustomer = api.registerCustomer,
+  submitLabel = "Create Account",
+  submittingLabel = "Creating...",
+  successLabel = "Registered",
 }: {
   onRegistered: () => void;
+  initialForm?: CustomerRegistrationRequest;
+  submitCustomer?: (
+    payload: CustomerRegistrationRequest,
+  ) => Promise<CustomerRegistrationResult>;
+  submitLabel?: string;
+  submittingLabel?: string;
+  successLabel?: string;
 }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<CustomerRegistrationRequest>(
-    emptyRegistrationForm,
-  );
+  const [form, setForm] = useState<CustomerRegistrationRequest>(initialForm);
+  const [registrationResult, setRegistrationResult] =
+    useState<CustomerRegistrationResult | null>(null);
   const mutation = useMutation({
-    mutationFn: api.registerCustomer,
-    onSuccess: async () => {
+    mutationFn: submitCustomer,
+    onSuccess: async (result) => {
+      setRegistrationResult(result);
       setForm(emptyRegistrationForm);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["customers"] }),
@@ -957,7 +1188,6 @@ function CustomerRegistrationForm({
         queryClient.invalidateQueries({ queryKey: ["overview"] }),
         queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
       ]);
-      onRegistered();
     },
   });
 
@@ -978,8 +1208,52 @@ function CustomerRegistrationForm({
             and account activation trigger.
           </p>
         </div>
-        {mutation.isSuccess && <StatusBadge label="Registered" tone="green" />}
+        {mutation.isSuccess && (
+          <StatusBadge label={successLabel} tone="green" />
+        )}
       </div>
+
+      {registrationResult?.activation && (
+        <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold">Activation created</p>
+              <p className="mt-1 text-emerald-950/75">
+                Share this activation link with the customer contact captured on
+                the account.
+              </p>
+              <p className="mt-2 break-all rounded-xl bg-white/70 px-3 py-2 font-mono text-xs">
+                {registrationResult.activation.activationUrl}
+              </p>
+              <p className="mt-2 text-emerald-950/75">
+                {registrationResult.validation
+                  ? registrationResult.validation.accepted
+                    ? `Primary number ${registrationResult.validation.msisdn} was verified and attached.`
+                    : `Primary number was not attached: ${registrationResult.validation.reason}`
+                  : "No primary number was attached. Add one from the account details when it is available."}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="rounded-xl"
+              onClick={() => {
+                void navigator.clipboard?.writeText(
+                  registrationResult.activation?.activationUrl ?? "",
+                );
+              }}
+            >
+              <Copy className="h-4 w-4" />
+              Copy link
+            </Button>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Button type="button" size="sm" onClick={onRegistered}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
 
       <form
         className="grid gap-4 sm:grid-cols-2"
@@ -994,9 +1268,10 @@ function CustomerRegistrationForm({
           onChange={(value) => updateField("businessName", value)}
         />
         <TextInput
-          label="Registration number"
-          value={form.registrationNumber}
-          onChange={(value) => updateField("registrationNumber", value)}
+          label="TIN (optional)"
+          value={form.tin ?? ""}
+          required={false}
+          onChange={(value) => updateField("tin", value)}
         />
         <TextInput
           label="Business email"
@@ -1036,8 +1311,9 @@ function CustomerRegistrationForm({
           onChange={(value) => updateField("apnId", value)}
         />
         <PhoneInput
-          label="Primary MSISDN"
-          value={form.primaryMsisdn}
+          label="Primary MSISDN (optional)"
+          value={form.primaryMsisdn ?? ""}
+          required={false}
           onChange={(value) => updateField("primaryMsisdn", value)}
         />
 
@@ -1049,7 +1325,7 @@ function CustomerRegistrationForm({
           )}
           <Button type="submit" variant="primary" disabled={mutation.isPending}>
             <Plus className="h-4 w-4" />
-            {mutation.isPending ? "Creating..." : "Create Account"}
+            {mutation.isPending ? submittingLabel : submitLabel}
           </Button>
         </div>
       </form>
@@ -1061,6 +1337,7 @@ function CustomerAdminDetail({ customer }: { customer: Customer }) {
   const queryClient = useQueryClient();
   const [updateForm, setUpdateForm] = useState<CustomerUpdateRequest>({
     businessName: customer.businessName,
+    tin: customer.tin ?? "",
     businessEmail: customer.businessEmail,
     businessPhone: customer.businessPhone,
     contactPerson: customer.contactPerson,
@@ -1076,6 +1353,7 @@ function CustomerAdminDetail({ customer }: { customer: Customer }) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["customers"] }),
       queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
+      queryClient.invalidateQueries({ queryKey: ["customer", customer.id] }),
       queryClient.invalidateQueries({ queryKey: ["overview"] }),
       queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
     ]);
@@ -1129,6 +1407,12 @@ function CustomerAdminDetail({ customer }: { customer: Customer }) {
           label="Business name"
           value={updateForm.businessName ?? ""}
           onChange={(value) => updateField("businessName", value)}
+        />
+        <TextInput
+          label="TIN (optional)"
+          value={updateForm.tin ?? ""}
+          required={false}
+          onChange={(value) => updateField("tin", value)}
         />
         <TextInput
           label="Business email"
@@ -1243,16 +1527,18 @@ function TextInput({
   value,
   onChange,
   type = "text",
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  required?: boolean;
 }) {
   return (
     <TextField
       label={label}
-      required
+      required={required}
       type={type}
       value={value}
       onValueChange={onChange}
@@ -1264,13 +1550,20 @@ function PhoneInput({
   label,
   value,
   onChange,
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  required?: boolean;
 }) {
   return (
-    <PhoneField label={label} required value={value} onValueChange={onChange} />
+    <PhoneField
+      label={label}
+      required={required}
+      value={value}
+      onValueChange={onChange}
+    />
   );
 }
 

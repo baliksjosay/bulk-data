@@ -35,7 +35,11 @@ export function PreferencesPanel() {
   );
 }
 
-function PreferencesForm({ initialPreferences }: { initialPreferences: UserPreferences }) {
+function PreferencesForm({
+  initialPreferences,
+}: {
+  initialPreferences: UserPreferences;
+}) {
   const queryClient = useQueryClient();
   const setTheme = useUiStore((state) => state.setTheme);
   const [draft, setDraft] = useState<UserPreferences>(initialPreferences);
@@ -72,7 +76,9 @@ function PreferencesForm({ initialPreferences }: { initialPreferences: UserPrefe
             <SelectField
               label="Theme"
               value={draft.theme}
-              onValueChange={(value) => setDraft({ ...draft, theme: value as UserPreferences["theme"] })}
+              onValueChange={(value) =>
+                setDraft({ ...draft, theme: value as UserPreferences["theme"] })
+              }
               options={[
                 { label: "Light", value: "light" },
                 { label: "Dark", value: "dark" },
@@ -81,20 +87,13 @@ function PreferencesForm({ initialPreferences }: { initialPreferences: UserPrefe
             />
 
             <SelectField
-              label="Language"
-              value={draft.language}
-              onValueChange={(value) => setDraft({ ...draft, language: value as UserPreferences["language"] })}
-              options={[
-                { label: "English", value: "en" },
-                { label: "Luganda", value: "lug" },
-              ]}
-            />
-
-            <SelectField
               label="Timezone"
               value={draft.timezone}
               onValueChange={(value) => setDraft({ ...draft, timezone: value })}
-              options={timezones.map((timezone) => ({ label: timezone, value: timezone }))}
+              options={timezones.map((timezone) => ({
+                label: timezone,
+                value: timezone,
+              }))}
             />
 
             <SelectField
@@ -215,12 +214,20 @@ function PreferencesForm({ initialPreferences }: { initialPreferences: UserPrefe
 
           <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] pt-4">
             {updateMutation.isError && (
-              <p className="mr-auto text-sm font-medium text-coral">{updateMutation.error.message}</p>
+              <p className="mr-auto text-sm font-medium text-coral">
+                {updateMutation.error.message}
+              </p>
             )}
             {updateMutation.isSuccess && (
-              <p className="mr-auto text-sm font-medium text-forest">Preferences saved.</p>
+              <p className="mr-auto text-sm font-medium text-forest">
+                Preferences saved.
+              </p>
             )}
-            <Button type="submit" variant="primary" disabled={updateMutation.isPending}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={updateMutation.isPending}
+            >
               <Save className="h-4 w-4" />
               {updateMutation.isPending ? "Saving..." : "Save Preferences"}
             </Button>

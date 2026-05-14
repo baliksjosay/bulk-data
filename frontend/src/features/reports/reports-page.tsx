@@ -1,16 +1,43 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, CheckCircle2, Gauge, ReceiptText, RotateCcw, UserPlus, X } from "lucide-react";
+import {
+  Activity,
+  CheckCircle2,
+  Gauge,
+  ReceiptText,
+  RotateCcw,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
-import { DataTable, type DataTableColumn, type DataTableRowAction } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRowAction,
+} from "@/components/ui/data-table";
 import { PhoneField, SelectField, TextField } from "@/components/ui/form-field";
 import { Panel } from "@/components/ui/panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { api } from "@/lib/api-client";
-import { formatDateTime, formatPaymentMethod, formatUgx, sentenceCase } from "@/lib/format";
-import { includesSearch, isWithinDateRange, paginateRows } from "@/lib/list-query";
-import { downloadTransactionReceipt, retryTransactionPayment, showPrimaryBalance, showSecondaryUsage } from "@/lib/table-actions";
+import {
+  formatDateTime,
+  formatPaymentMethod,
+  formatUgx,
+  sentenceCase,
+} from "@/lib/format";
+import {
+  includesSearch,
+  isWithinDateRange,
+  paginateRows,
+} from "@/lib/list-query";
+import { createServiceRequestConversionForm } from "@/lib/service-request-conversion";
+import {
+  downloadTransactionReceipt,
+  retryTransactionPayment,
+  showPrimaryBalance,
+  showSecondaryUsage,
+} from "@/lib/table-actions";
 import type {
   AdminReport,
   BalanceResult,
@@ -74,11 +101,14 @@ const reportColumns: Array<DataTableColumn<ReportTransaction>> = [
   {
     id: "customer",
     header: "Customer",
-    exportValue: (transaction) => `${transaction.customerName} (${transaction.registrationNumber})`,
+    exportValue: (transaction) =>
+      `${transaction.customerName} (${transaction.registrationNumber})`,
     cell: (transaction) => (
       <div>
         <p className="font-medium">{transaction.customerName}</p>
-        <p className="text-xs text-[var(--muted)]">{transaction.registrationNumber}</p>
+        <p className="text-xs text-[var(--muted)]">
+          {transaction.registrationNumber}
+        </p>
       </div>
     ),
   },
@@ -103,7 +133,8 @@ const reportColumns: Array<DataTableColumn<ReportTransaction>> = [
   {
     id: "paymentMethod",
     header: "Payment",
-    exportValue: (transaction) => formatPaymentMethod(transaction.paymentMethod),
+    exportValue: (transaction) =>
+      formatPaymentMethod(transaction.paymentMethod),
     cell: (transaction) => formatPaymentMethod(transaction.paymentMethod),
   },
   {
@@ -119,13 +150,21 @@ const reportColumns: Array<DataTableColumn<ReportTransaction>> = [
     cell: (transaction) => (
       <StatusBadge
         label={sentenceCase(transaction.status)}
-        tone={transaction.status === "provisioned" ? "green" : transaction.status === "failed" ? "red" : "yellow"}
+        tone={
+          transaction.status === "provisioned"
+            ? "green"
+            : transaction.status === "failed"
+              ? "red"
+              : "yellow"
+        }
       />
     ),
   },
 ];
 
-const activityColumns: Array<DataTableColumn<AdminReport["customerActivity"][number]>> = [
+const activityColumns: Array<
+  DataTableColumn<AdminReport["customerActivity"][number]>
+> = [
   {
     id: "customer",
     header: "Customer",
@@ -167,7 +206,10 @@ const activityColumns: Array<DataTableColumn<AdminReport["customerActivity"][num
     header: "Status",
     exportValue: (item) => sentenceCase(item.status),
     cell: (item) => (
-      <StatusBadge label={sentenceCase(item.status)} tone={item.status === "active" ? "green" : "yellow"} />
+      <StatusBadge
+        label={sentenceCase(item.status)}
+        tone={item.status === "active" ? "green" : "yellow"}
+      />
     ),
   },
 ];
@@ -199,7 +241,9 @@ const serviceRequestColumns: Array<DataTableColumn<ServiceRequest>> = [
       <div>
         <p className="font-medium">{serviceRequest.businessName}</p>
         {serviceRequest.message && (
-          <p className="mt-1 max-w-sm text-xs text-[var(--muted)]">{serviceRequest.message}</p>
+          <p className="mt-1 max-w-sm text-xs text-[var(--muted)]">
+            {serviceRequest.message}
+          </p>
         )}
       </div>
     ),
@@ -212,16 +256,22 @@ const serviceRequestColumns: Array<DataTableColumn<ServiceRequest>> = [
     cell: (serviceRequest) => (
       <div>
         <p className="font-medium">{serviceRequest.contactPerson}</p>
-        <p className="text-xs text-[var(--muted)]">{serviceRequest.contactEmail}</p>
-        <p className="text-xs text-[var(--muted)]">{serviceRequest.contactPhone}</p>
+        <p className="text-xs text-[var(--muted)]">
+          {serviceRequest.contactEmail}
+        </p>
+        <p className="text-xs text-[var(--muted)]">
+          {serviceRequest.contactPhone}
+        </p>
       </div>
     ),
   },
   {
     id: "package",
     header: "Package",
-    exportValue: (serviceRequest) => serviceRequest.preferredPackageName ?? "Not selected",
-    cell: (serviceRequest) => serviceRequest.preferredPackageName ?? "Not selected",
+    exportValue: (serviceRequest) =>
+      serviceRequest.preferredPackageName ?? "Not selected",
+    cell: (serviceRequest) =>
+      serviceRequest.preferredPackageName ?? "Not selected",
   },
   {
     id: "status",
@@ -258,7 +308,8 @@ const purchaseColumns: Array<DataTableColumn<Transaction>> = [
   {
     id: "paymentMethod",
     header: "Payment",
-    exportValue: (transaction) => formatPaymentMethod(transaction.paymentMethod),
+    exportValue: (transaction) =>
+      formatPaymentMethod(transaction.paymentMethod),
     cell: (transaction) => formatPaymentMethod(transaction.paymentMethod),
   },
   {
@@ -274,7 +325,13 @@ const purchaseColumns: Array<DataTableColumn<Transaction>> = [
     cell: (transaction) => (
       <StatusBadge
         label={sentenceCase(transaction.status)}
-        tone={transaction.status === "provisioned" ? "green" : transaction.status === "failed" ? "red" : "yellow"}
+        tone={
+          transaction.status === "provisioned"
+            ? "green"
+            : transaction.status === "failed"
+              ? "red"
+              : "yellow"
+        }
       />
     ),
   },
@@ -285,7 +342,9 @@ const secondaryColumns: Array<DataTableColumn<SecondaryNumber>> = [
     id: "msisdn",
     header: "MSISDN",
     exportValue: (secondaryNumber) => secondaryNumber.msisdn,
-    cell: (secondaryNumber) => <span className="font-medium">{secondaryNumber.msisdn}</span>,
+    cell: (secondaryNumber) => (
+      <span className="font-medium">{secondaryNumber.msisdn}</span>
+    ),
   },
   {
     id: "primary",
@@ -323,7 +382,9 @@ const balanceColumns: Array<DataTableColumn<BalanceResult>> = [
     id: "primary",
     header: "Primary MSISDN",
     exportValue: (balance) => balance.primaryMsisdn,
-    cell: (balance) => <span className="font-medium">{balance.primaryMsisdn}</span>,
+    cell: (balance) => (
+      <span className="font-medium">{balance.primaryMsisdn}</span>
+    ),
   },
   {
     id: "bundleName",
@@ -334,13 +395,16 @@ const balanceColumns: Array<DataTableColumn<BalanceResult>> = [
   {
     id: "remaining",
     header: "Remaining",
-    exportValue: (balance) => `${balance.remainingVolumeGb.toLocaleString("en-US")} GB`,
-    cell: (balance) => `${balance.remainingVolumeGb.toLocaleString("en-US")} GB`,
+    exportValue: (balance) =>
+      `${balance.remainingVolumeGb.toLocaleString("en-US")} GB`,
+    cell: (balance) =>
+      `${balance.remainingVolumeGb.toLocaleString("en-US")} GB`,
   },
   {
     id: "total",
     header: "Total",
-    exportValue: (balance) => `${balance.totalVolumeGb.toLocaleString("en-US")} GB`,
+    exportValue: (balance) =>
+      `${balance.totalVolumeGb.toLocaleString("en-US")} GB`,
     cell: (balance) => `${balance.totalVolumeGb.toLocaleString("en-US")} GB`,
   },
   {
@@ -370,7 +434,10 @@ function buildTransactionRowActions({
       label: "Check balance",
       icon: Activity,
       onSelect: (transaction) => {
-        void showPrimaryBalance(transaction.customerId, transaction.primaryMsisdn);
+        void showPrimaryBalance(
+          transaction.customerId,
+          transaction.primaryMsisdn,
+        );
       },
     },
     {
@@ -409,14 +476,17 @@ const secondaryRowActions: Array<DataTableRowAction<SecondaryNumber>> = [
     label: "Check balance",
     icon: Activity,
     onSelect: (secondaryNumber) => {
-      void showPrimaryBalance(secondaryNumber.customerId, secondaryNumber.primaryMsisdn);
+      void showPrimaryBalance(
+        secondaryNumber.customerId,
+        secondaryNumber.primaryMsisdn,
+      );
     },
   },
 ];
 
 export function ReportsPage({ report }: { report: ReportSection }) {
   if (report === "report-service-requests") {
-    return <ServiceRequestsReportPage />;
+    return <ServiceRequestsPage />;
   }
 
   if (report === "report-customer-activity") {
@@ -438,13 +508,20 @@ export function ReportsPage({ report }: { report: ReportSection }) {
   return <TransactionReportPage />;
 }
 
-function shouldRunAsyncSearchFallback(search: string, total: number, sourceReady: boolean) {
+function shouldRunAsyncSearchFallback(
+  search: string,
+  total: number,
+  sourceReady: boolean,
+) {
   return sourceReady && search.trim().length > 0 && total === 0;
 }
 
 function TransactionReportPage() {
   const queryClient = useQueryClient();
-  const customersQuery = useQuery({ queryKey: ["customers"], queryFn: api.customers });
+  const customersQuery = useQuery({
+    queryKey: ["customers"],
+    queryFn: api.customers,
+  });
   const [reportFilters, setReportFilters] = useState<ReportTableFilters>({
     search: "",
     customerId: "",
@@ -479,7 +556,11 @@ function TransactionReportPage() {
   });
 
   function updateReportFilters(nextFilters: Partial<ReportTableFilters>) {
-    setReportFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setReportFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
 
   if (customersQuery.isError) {
@@ -496,7 +577,9 @@ function TransactionReportPage() {
         rows={reportRows}
         getRowKey={(transaction) => transaction.id}
         minWidth={1080}
-        isLoading={paginatedTransactionsQuery.isLoading || customersQuery.isLoading}
+        isLoading={
+          paginatedTransactionsQuery.isLoading || customersQuery.isLoading
+        }
         exportOptions={{
           title: "Transaction Report",
           filename: "transaction-report",
@@ -515,13 +598,20 @@ function TransactionReportPage() {
               onChange={(value) => updateReportFilters({ customerId: value })}
               options={[
                 { label: "All customers", value: "" },
-                ...(customersQuery.data ?? []).map((customer) => ({ label: customer.businessName, value: customer.id })),
+                ...(customersQuery.data ?? []).map((customer) => ({
+                  label: customer.businessName,
+                  value: customer.id,
+                })),
               ]}
             />
             <FilterSelect
               label="Status"
               value={reportFilters.status}
-              onChange={(value) => updateReportFilters({ status: value as ReportTableFilters["status"] })}
+              onChange={(value) =>
+                updateReportFilters({
+                  status: value as ReportTableFilters["status"],
+                })
+              }
               options={[
                 { label: "All statuses", value: "" },
                 { label: "Provisioned", value: "provisioned" },
@@ -532,7 +622,11 @@ function TransactionReportPage() {
             <FilterSelect
               label="Payment"
               value={reportFilters.paymentMethod}
-              onChange={(value) => updateReportFilters({ paymentMethod: value as ReportTableFilters["paymentMethod"] })}
+              onChange={(value) =>
+                updateReportFilters({
+                  paymentMethod: value as ReportTableFilters["paymentMethod"],
+                })
+              }
               options={[
                 { label: "All payments", value: "" },
                 { label: "Mobile Money", value: "mobile_money" },
@@ -579,22 +673,7 @@ function TransactionReportPage() {
   );
 }
 
-function createConversionForm(serviceRequest: ServiceRequest): CustomerRegistrationRequest {
-  return {
-    businessName: serviceRequest.businessName,
-    registrationNumber: "",
-    businessEmail: serviceRequest.contactEmail,
-    businessPhone: serviceRequest.contactPhone,
-    contactPerson: serviceRequest.contactPerson,
-    contactEmail: serviceRequest.contactEmail,
-    contactPhone: serviceRequest.contactPhone,
-    apnName: "",
-    apnId: "",
-    primaryMsisdn: "+256",
-  };
-}
-
-function ServiceRequestsReportPage() {
+export function ServiceRequestsPage() {
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<ServiceRequestFilters>({
     search: "",
@@ -604,8 +683,10 @@ function ServiceRequestsReportPage() {
     page: 1,
     limit: 10,
   });
-  const [selectedServiceRequest, setSelectedServiceRequest] = useState<ServiceRequest | null>(null);
-  const [conversionForm, setConversionForm] = useState<CustomerRegistrationRequest | null>(null);
+  const [selectedServiceRequest, setSelectedServiceRequest] =
+    useState<ServiceRequest | null>(null);
+  const [conversionForm, setConversionForm] =
+    useState<CustomerRegistrationRequest | null>(null);
   const serviceRequestsQuery = useQuery({
     queryKey: ["service-requests", filters],
     queryFn: () => api.serviceRequestsPage(filters),
@@ -629,8 +710,13 @@ function ServiceRequestsReportPage() {
     onSuccess: invalidateServiceRequests,
   });
   const convertMutation = useMutation({
-    mutationFn: ({ serviceRequestId, payload }: { serviceRequestId: string; payload: CustomerRegistrationRequest }) =>
-      api.convertServiceRequest(serviceRequestId, payload),
+    mutationFn: ({
+      serviceRequestId,
+      payload,
+    }: {
+      serviceRequestId: string;
+      payload: CustomerRegistrationRequest;
+    }) => api.convertServiceRequest(serviceRequestId, payload),
     onSuccess: async () => {
       setSelectedServiceRequest(null);
       setConversionForm(null);
@@ -639,12 +725,16 @@ function ServiceRequestsReportPage() {
   });
 
   function updateFilters(nextFilters: Partial<ServiceRequestFilters>) {
-    setFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
 
   function openConversionDrawer(serviceRequest: ServiceRequest) {
     setSelectedServiceRequest(serviceRequest);
-    setConversionForm(createConversionForm(serviceRequest));
+    setConversionForm(createServiceRequestConversionForm(serviceRequest));
   }
 
   function closeConversionDrawer() {
@@ -656,15 +746,20 @@ function ServiceRequestsReportPage() {
     key: Key,
     value: CustomerRegistrationRequest[Key],
   ) {
-    setConversionForm((current) => (current ? { ...current, [key]: value } : current));
+    setConversionForm((current) =>
+      current ? { ...current, [key]: value } : current,
+    );
   }
 
-  const rowActions = (serviceRequest: ServiceRequest): Array<DataTableRowAction<ServiceRequest>> => [
+  const rowActions = (
+    serviceRequest: ServiceRequest,
+  ): Array<DataTableRowAction<ServiceRequest>> => [
     {
       id: "mark-contacted",
       label: "Mark contacted",
       icon: CheckCircle2,
-      disabled: serviceRequest.status !== "new" || markContactedMutation.isPending,
+      disabled:
+        serviceRequest.status !== "new" || markContactedMutation.isPending,
       hidden: serviceRequest.status === "converted",
       onSelect: (row) => markContactedMutation.mutate(row),
     },
@@ -679,7 +774,7 @@ function ServiceRequestsReportPage() {
 
   return (
     <ReportFrame
-      title="Service Request Report"
+      title="Service Requests"
       description="Manage public onboarding requests, track follow-up, and convert qualified requests into customer accounts."
     >
       <DataTable
@@ -690,8 +785,8 @@ function ServiceRequestsReportPage() {
         isLoading={serviceRequestsQuery.isLoading}
         emptyMessage="No service requests found."
         exportOptions={{
-          title: "Service Request Report",
-          filename: "service-request-report",
+          title: "Service Requests",
+          filename: "service-requests",
         }}
         rowActions={rowActions}
         filters={
@@ -704,7 +799,11 @@ function ServiceRequestsReportPage() {
             <FilterSelect
               label="Status"
               value={filters.status}
-              onChange={(value) => updateFilters({ status: value as ServiceRequestFilters["status"] })}
+              onChange={(value) =>
+                updateFilters({
+                  status: value as ServiceRequestFilters["status"],
+                })
+              }
               options={[
                 { label: "All statuses", value: "" },
                 { label: "New", value: "new" },
@@ -749,7 +848,9 @@ function ServiceRequestsReportPage() {
         serviceRequest={selectedServiceRequest}
         form={conversionForm}
         isSubmitting={convertMutation.isPending}
-        errorMessage={convertMutation.isError ? convertMutation.error.message : ""}
+        errorMessage={
+          convertMutation.isError ? convertMutation.error.message : ""
+        }
         onClose={closeConversionDrawer}
         onFieldChange={updateConversionField}
         onSubmit={() => {
@@ -766,7 +867,10 @@ function ServiceRequestsReportPage() {
 }
 
 function CustomerActivityReportPage() {
-  const adminReportQuery = useQuery({ queryKey: ["admin-report"], queryFn: () => api.adminReport() });
+  const adminReportQuery = useQuery({
+    queryKey: ["admin-report"],
+    queryFn: () => api.adminReport(),
+  });
   const [activityFilters, setActivityFilters] = useState<ActivityFilters>({
     search: "",
     status: "",
@@ -778,8 +882,17 @@ function CustomerActivityReportPage() {
   const activityPage = useMemo(() => {
     const rows =
       adminReportQuery.data?.customerActivity
-        .filter((item) => !activityFilters.status || item.status === activityFilters.status)
-        .filter((item) => isWithinDateRange(item.createdAt, activityFilters.dateFrom, activityFilters.dateTo))
+        .filter(
+          (item) =>
+            !activityFilters.status || item.status === activityFilters.status,
+        )
+        .filter((item) =>
+          isWithinDateRange(
+            item.createdAt,
+            activityFilters.dateFrom,
+            activityFilters.dateTo,
+          ),
+        )
         .filter((item) =>
           includesSearch(
             [
@@ -802,7 +915,11 @@ function CustomerActivityReportPage() {
     adminReportQuery.isSuccess,
   );
   const activityFallbackQuery = useQuery({
-    queryKey: ["admin-report-search-fallback", "customer-activity", activityFilters],
+    queryKey: [
+      "admin-report-search-fallback",
+      "customer-activity",
+      activityFilters,
+    ],
     queryFn: () => api.adminReport(activityFilters),
     enabled: runActivityFallback,
   });
@@ -813,12 +930,22 @@ function CustomerActivityReportPage() {
         activityFilters.page,
         activityFilters.limit,
       ),
-    [activityFallbackQuery.data?.customerActivity, activityFilters.limit, activityFilters.page],
+    [
+      activityFallbackQuery.data?.customerActivity,
+      activityFilters.limit,
+      activityFilters.page,
+    ],
   );
-  const effectiveActivityPage = activityFallbackQuery.data ? activityFallbackPage : activityPage;
+  const effectiveActivityPage = activityFallbackQuery.data
+    ? activityFallbackPage
+    : activityPage;
 
   function updateActivityFilters(nextFilters: Partial<ActivityFilters>) {
-    setActivityFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setActivityFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
 
   if (adminReportQuery.isError) {
@@ -835,7 +962,9 @@ function CustomerActivityReportPage() {
         rows={effectiveActivityPage.data}
         getRowKey={(item) => item.customerId}
         minWidth={860}
-        isLoading={adminReportQuery.isLoading || activityFallbackQuery.isFetching}
+        isLoading={
+          adminReportQuery.isLoading || activityFallbackQuery.isFetching
+        }
         exportOptions={{
           title: "Customer Activity Report",
           filename: "customer-activity-report",
@@ -850,7 +979,11 @@ function CustomerActivityReportPage() {
             <FilterSelect
               label="Status"
               value={activityFilters.status}
-              onChange={(value) => updateActivityFilters({ status: value as ActivityFilters["status"] })}
+              onChange={(value) =>
+                updateActivityFilters({
+                  status: value as ActivityFilters["status"],
+                })
+              }
               options={[
                 { label: "All statuses", value: "" },
                 { label: "Active", value: "active" },
@@ -890,7 +1023,12 @@ function CustomerActivityReportPage() {
 }
 
 function BundlePurchasesReportPage() {
-  const { customersQuery, customerReportQuery, selectedCustomer, setCustomerId } = useSelectedCustomerReport();
+  const {
+    customersQuery,
+    customerReportQuery,
+    selectedCustomer,
+    setCustomerId,
+  } = useSelectedCustomerReport();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<CustomerReportFilters>({
     search: "",
@@ -903,8 +1041,17 @@ function BundlePurchasesReportPage() {
   const purchasePage = useMemo(() => {
     const rows =
       customerReportQuery.data?.bundlePurchaseHistory
-        .filter((transaction) => !filters.status || transaction.status === filters.status)
-        .filter((transaction) => isWithinDateRange(transaction.createdAt, filters.dateFrom, filters.dateTo))
+        .filter(
+          (transaction) =>
+            !filters.status || transaction.status === filters.status,
+        )
+        .filter((transaction) =>
+          isWithinDateRange(
+            transaction.createdAt,
+            filters.dateFrom,
+            filters.dateTo,
+          ),
+        )
         .filter((transaction) =>
           includesSearch(
             [
@@ -926,7 +1073,12 @@ function BundlePurchasesReportPage() {
     customerReportQuery.isSuccess && Boolean(selectedCustomer?.id),
   );
   const purchaseFallbackQuery = useQuery({
-    queryKey: ["customer-report-search-fallback", "bundle-purchases", selectedCustomer?.id, filters],
+    queryKey: [
+      "customer-report-search-fallback",
+      "bundle-purchases",
+      selectedCustomer?.id,
+      filters,
+    ],
     queryFn: () => api.customerReport(selectedCustomer?.id ?? "", filters),
     enabled: runPurchaseFallback,
   });
@@ -937,9 +1089,15 @@ function BundlePurchasesReportPage() {
         filters.page,
         filters.limit,
       ),
-    [filters.limit, filters.page, purchaseFallbackQuery.data?.bundlePurchaseHistory],
+    [
+      filters.limit,
+      filters.page,
+      purchaseFallbackQuery.data?.bundlePurchaseHistory,
+    ],
   );
-  const effectivePurchasePage = purchaseFallbackQuery.data ? purchaseFallbackPage : purchasePage;
+  const effectivePurchasePage = purchaseFallbackQuery.data
+    ? purchaseFallbackPage
+    : purchasePage;
   const retryTransactionMutation = useMutation({
     mutationFn: retryTransactionPayment,
     onSuccess: async () => {
@@ -953,7 +1111,11 @@ function BundlePurchasesReportPage() {
   });
 
   function updateFilters(nextFilters: Partial<CustomerReportFilters>) {
-    setFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
   const purchaseRowActions: Array<DataTableRowAction<Transaction>> = [
     {
@@ -963,7 +1125,10 @@ function BundlePurchasesReportPage() {
       disabled: !selectedCustomer,
       onSelect: (transaction) => {
         if (selectedCustomer) {
-          void showPrimaryBalance(selectedCustomer.id, transaction.primaryMsisdn);
+          void showPrimaryBalance(
+            selectedCustomer.id,
+            transaction.primaryMsisdn,
+          );
         }
       },
     },
@@ -1001,7 +1166,9 @@ function BundlePurchasesReportPage() {
         rows={effectivePurchasePage.data}
         getRowKey={(transaction) => transaction.id}
         minWidth={860}
-        isLoading={customerReportQuery.isLoading || purchaseFallbackQuery.isFetching}
+        isLoading={
+          customerReportQuery.isLoading || purchaseFallbackQuery.isFetching
+        }
         emptyMessage="No purchases found for the selected filters."
         exportOptions={{
           title: "Bundle Purchases Report",
@@ -1010,7 +1177,11 @@ function BundlePurchasesReportPage() {
         rowActions={purchaseRowActions}
         filters={
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <FilterInput label="Search" value={filters.search} onChange={(value) => updateFilters({ search: value })} />
+            <FilterInput
+              label="Search"
+              value={filters.search}
+              onChange={(value) => updateFilters({ search: value })}
+            />
             <FilterSelect
               label="Status"
               value={filters.status}
@@ -1055,7 +1226,12 @@ function BundlePurchasesReportPage() {
 }
 
 function SecondaryNumbersReportPage() {
-  const { customersQuery, customerReportQuery, selectedCustomer, setCustomerId } = useSelectedCustomerReport();
+  const {
+    customersQuery,
+    customerReportQuery,
+    selectedCustomer,
+    setCustomerId,
+  } = useSelectedCustomerReport();
   const [filters, setFilters] = useState<CustomerReportFilters>({
     search: "",
     status: "",
@@ -1067,11 +1243,25 @@ function SecondaryNumbersReportPage() {
   const secondaryPage = useMemo(() => {
     const rows =
       customerReportQuery.data?.secondaryNumbers
-        .filter((secondaryNumber) => !filters.status || secondaryNumber.status === filters.status)
-        .filter((secondaryNumber) => isWithinDateRange(secondaryNumber.addedAt, filters.dateFrom, filters.dateTo))
+        .filter(
+          (secondaryNumber) =>
+            !filters.status || secondaryNumber.status === filters.status,
+        )
+        .filter((secondaryNumber) =>
+          isWithinDateRange(
+            secondaryNumber.addedAt,
+            filters.dateFrom,
+            filters.dateTo,
+          ),
+        )
         .filter((secondaryNumber) =>
           includesSearch(
-            [secondaryNumber.msisdn, secondaryNumber.primaryMsisdn, secondaryNumber.apnId, secondaryNumber.status],
+            [
+              secondaryNumber.msisdn,
+              secondaryNumber.primaryMsisdn,
+              secondaryNumber.apnId,
+              secondaryNumber.status,
+            ],
             filters.search.toLowerCase(),
           ),
         ) ?? [];
@@ -1084,7 +1274,12 @@ function SecondaryNumbersReportPage() {
     customerReportQuery.isSuccess && Boolean(selectedCustomer?.id),
   );
   const secondaryFallbackQuery = useQuery({
-    queryKey: ["customer-report-search-fallback", "secondary-numbers", selectedCustomer?.id, filters],
+    queryKey: [
+      "customer-report-search-fallback",
+      "secondary-numbers",
+      selectedCustomer?.id,
+      filters,
+    ],
     queryFn: () => api.customerReport(selectedCustomer?.id ?? "", filters),
     enabled: runSecondaryFallback,
   });
@@ -1095,12 +1290,22 @@ function SecondaryNumbersReportPage() {
         filters.page,
         filters.limit,
       ),
-    [filters.limit, filters.page, secondaryFallbackQuery.data?.secondaryNumbers],
+    [
+      filters.limit,
+      filters.page,
+      secondaryFallbackQuery.data?.secondaryNumbers,
+    ],
   );
-  const effectiveSecondaryPage = secondaryFallbackQuery.data ? secondaryFallbackPage : secondaryPage;
+  const effectiveSecondaryPage = secondaryFallbackQuery.data
+    ? secondaryFallbackPage
+    : secondaryPage;
 
   function updateFilters(nextFilters: Partial<CustomerReportFilters>) {
-    setFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
 
   return (
@@ -1118,7 +1323,9 @@ function SecondaryNumbersReportPage() {
         rows={effectiveSecondaryPage.data}
         getRowKey={(secondaryNumber) => secondaryNumber.id}
         minWidth={760}
-        isLoading={customerReportQuery.isLoading || secondaryFallbackQuery.isFetching}
+        isLoading={
+          customerReportQuery.isLoading || secondaryFallbackQuery.isFetching
+        }
         emptyMessage="No secondary numbers found for the selected filters."
         exportOptions={{
           title: "Secondary Numbers Report",
@@ -1127,7 +1334,11 @@ function SecondaryNumbersReportPage() {
         rowActions={secondaryRowActions}
         filters={
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <FilterInput label="Search" value={filters.search} onChange={(value) => updateFilters({ search: value })} />
+            <FilterInput
+              label="Search"
+              value={filters.search}
+              onChange={(value) => updateFilters({ search: value })}
+            />
             <FilterSelect
               label="Status"
               value={filters.status}
@@ -1171,7 +1382,12 @@ function SecondaryNumbersReportPage() {
 }
 
 function BalancesReportPage() {
-  const { customersQuery, customerReportQuery, selectedCustomer, setCustomerId } = useSelectedCustomerReport();
+  const {
+    customersQuery,
+    customerReportQuery,
+    selectedCustomer,
+    setCustomerId,
+  } = useSelectedCustomerReport();
   const [filters, setFilters] = useState<CustomerReportFilters>({
     search: "",
     status: "",
@@ -1183,10 +1399,17 @@ function BalancesReportPage() {
   const balancePage = useMemo(() => {
     const rows =
       customerReportQuery.data?.balances
-        .filter((balance) => isWithinDateRange(balance.expiryAt, filters.dateFrom, filters.dateTo))
+        .filter((balance) =>
+          isWithinDateRange(balance.expiryAt, filters.dateFrom, filters.dateTo),
+        )
         .filter((balance) =>
           includesSearch(
-            [balance.primaryMsisdn, balance.bundleName, balance.remainingVolumeGb, balance.totalVolumeGb],
+            [
+              balance.primaryMsisdn,
+              balance.bundleName,
+              balance.remainingVolumeGb,
+              balance.totalVolumeGb,
+            ],
             filters.search.toLowerCase(),
           ),
         ) ?? [];
@@ -1199,7 +1422,12 @@ function BalancesReportPage() {
     customerReportQuery.isSuccess && Boolean(selectedCustomer?.id),
   );
   const balanceFallbackQuery = useQuery({
-    queryKey: ["customer-report-search-fallback", "balances", selectedCustomer?.id, filters],
+    queryKey: [
+      "customer-report-search-fallback",
+      "balances",
+      selectedCustomer?.id,
+      filters,
+    ],
     queryFn: () => api.customerReport(selectedCustomer?.id ?? "", filters),
     enabled: runBalanceFallback,
   });
@@ -1212,10 +1440,16 @@ function BalancesReportPage() {
       ),
     [balanceFallbackQuery.data?.balances, filters.limit, filters.page],
   );
-  const effectiveBalancePage = balanceFallbackQuery.data ? balanceFallbackPage : balancePage;
+  const effectiveBalancePage = balanceFallbackQuery.data
+    ? balanceFallbackPage
+    : balancePage;
 
   function updateFilters(nextFilters: Partial<CustomerReportFilters>) {
-    setFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
 
   return (
@@ -1233,7 +1467,9 @@ function BalancesReportPage() {
         rows={effectiveBalancePage.data}
         getRowKey={(balance) => balance.primaryMsisdn}
         minWidth={760}
-        isLoading={customerReportQuery.isLoading || balanceFallbackQuery.isFetching}
+        isLoading={
+          customerReportQuery.isLoading || balanceFallbackQuery.isFetching
+        }
         emptyMessage="No balances found for the selected filters."
         exportOptions={{
           title: "Balances Report",
@@ -1241,7 +1477,11 @@ function BalancesReportPage() {
         }}
         filters={
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <FilterInput label="Search" value={filters.search} onChange={(value) => updateFilters({ search: value })} />
+            <FilterInput
+              label="Search"
+              value={filters.search}
+              onChange={(value) => updateFilters({ search: value })}
+            />
             <FilterInput
               label="Expiry from"
               type="date"
@@ -1274,11 +1514,16 @@ function BalancesReportPage() {
 }
 
 function useSelectedCustomerReport() {
-  const customersQuery = useQuery({ queryKey: ["customers"], queryFn: api.customers });
+  const customersQuery = useQuery({
+    queryKey: ["customers"],
+    queryFn: api.customers,
+  });
   const [customerId, setCustomerId] = useState("");
   const selectedCustomer = useMemo(() => {
     const effectiveCustomerId = customerId || customersQuery.data?.[0]?.id;
-    return customersQuery.data?.find((customer) => customer.id === effectiveCustomerId);
+    return customersQuery.data?.find(
+      (customer) => customer.id === effectiveCustomerId,
+    );
   }, [customerId, customersQuery.data]);
   const customerReportQuery = useQuery({
     queryKey: ["customer-report", selectedCustomer?.id],
@@ -1319,7 +1564,7 @@ function ServiceRequestConversionDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--console-header-height,4rem)] z-50">
       <button
         type="button"
         aria-label="Close service request conversion drawer"
@@ -1334,11 +1579,15 @@ function ServiceRequestConversionDrawer({
       >
         <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-4 py-4">
           <div>
-            <h2 id="service-request-conversion-title" className="text-lg font-semibold">
+            <h2
+              id="service-request-conversion-title"
+              className="text-lg font-semibold"
+            >
               Convert Service Request
             </h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Create a customer account after confirming business registration, APN mapping, and primary MSISDN.
+              Create a customer account after confirming business registration,
+              APN mapping, and primary MSISDN.
             </p>
           </div>
           <button
@@ -1354,11 +1603,26 @@ function ServiceRequestConversionDrawer({
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="mb-5 grid gap-3 rounded-md border border-border/50 bg-background p-3 sm:grid-cols-2">
             <DetailItem label="Business" value={serviceRequest.businessName} />
-            <DetailItem label="Preferred package" value={serviceRequest.preferredPackageName ?? "Not selected"} />
-            <DetailItem label="Contact person" value={serviceRequest.contactPerson} />
-            <DetailItem label="Contact email" value={serviceRequest.contactEmail} />
-            <DetailItem label="Contact phone" value={serviceRequest.contactPhone} />
-            <DetailItem label="Status" value={sentenceCase(serviceRequest.status)} />
+            <DetailItem
+              label="Preferred package"
+              value={serviceRequest.preferredPackageName ?? "Not selected"}
+            />
+            <DetailItem
+              label="Contact person"
+              value={serviceRequest.contactPerson}
+            />
+            <DetailItem
+              label="Contact email"
+              value={serviceRequest.contactEmail}
+            />
+            <DetailItem
+              label="Contact phone"
+              value={serviceRequest.contactPhone}
+            />
+            <DetailItem
+              label="Status"
+              value={sentenceCase(serviceRequest.status)}
+            />
             {serviceRequest.message && (
               <div className="sm:col-span-2">
                 <DetailItem label="Message" value={serviceRequest.message} />
@@ -1380,10 +1644,9 @@ function ServiceRequestConversionDrawer({
               onValueChange={(value) => onFieldChange("businessName", value)}
             />
             <TextField
-              label="Registration number"
-              value={form.registrationNumber}
-              required
-              onValueChange={(value) => onFieldChange("registrationNumber", value)}
+              label="TIN (optional)"
+              value={form.tin ?? ""}
+              onValueChange={(value) => onFieldChange("tin", value)}
             />
             <TextField
               label="Business email"
@@ -1430,14 +1693,17 @@ function ServiceRequestConversionDrawer({
               onValueChange={(value) => onFieldChange("apnId", value)}
             />
             <PhoneField
-              label="Primary MSISDN"
-              value={form.primaryMsisdn}
-              required
+              label="Primary MSISDN (optional)"
+              value={form.primaryMsisdn ?? ""}
               onValueChange={(value) => onFieldChange("primaryMsisdn", value)}
             />
 
             <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] pt-4 sm:col-span-2">
-              {errorMessage && <p className="mr-auto text-sm font-medium text-coral">{errorMessage}</p>}
+              {errorMessage && (
+                <p className="mr-auto text-sm font-medium text-coral">
+                  {errorMessage}
+                </p>
+              )}
               <button
                 type="button"
                 className="inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--panel-strong)]"
@@ -1464,7 +1730,9 @@ function ServiceRequestConversionDrawer({
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase text-[var(--muted)]">{label}</p>
+      <p className="text-xs font-medium uppercase text-[var(--muted)]">
+        {label}
+      </p>
       <p className="mt-1 text-sm font-medium">{value}</p>
     </div>
   );
@@ -1524,7 +1792,10 @@ function CustomerReportFrame({
           label="Customer"
           value={selectedCustomer?.id ?? ""}
           onValueChange={onCustomerChange}
-          options={customers.map((customer) => ({ label: customer.businessName, value: customer.id }))}
+          options={customers.map((customer) => ({
+            label: customer.businessName,
+            value: customer.id,
+          }))}
         />
       </div>
       <Panel>{isLoading ? "Loading customer report..." : children}</Panel>
@@ -1544,7 +1815,12 @@ function FilterInput({
   type?: string;
 }) {
   return (
-    <TextField label={label} type={type} value={value} onValueChange={onChange} />
+    <TextField
+      label={label}
+      type={type}
+      value={value}
+      onValueChange={onChange}
+    />
   );
 }
 
@@ -1560,6 +1836,11 @@ function FilterSelect({
   options: Array<{ label: string; value: string }>;
 }) {
   return (
-    <SelectField label={label} value={value} onValueChange={onChange} options={options} />
+    <SelectField
+      label={label}
+      value={value}
+      onValueChange={onChange}
+      options={options}
+    />
   );
 }

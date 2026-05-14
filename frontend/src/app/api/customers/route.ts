@@ -7,9 +7,19 @@ import type { CustomerStatus } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
+const optionalTrimmedString = (schema: z.ZodString) =>
+  z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === ""
+        ? undefined
+        : value,
+    schema.optional(),
+  );
+
 const customerRegistrationSchema = z.object({
   businessName: z.string().min(2),
-  registrationNumber: z.string().min(2),
+  registrationNumber: optionalTrimmedString(z.string().min(2)),
+  tin: optionalTrimmedString(z.string().max(40)),
   businessEmail: z.string().email(),
   businessPhone: z.string().regex(UGANDA_PHONE_PATTERN),
   contactPerson: z.string().min(2),
@@ -17,7 +27,7 @@ const customerRegistrationSchema = z.object({
   contactPhone: z.string().regex(UGANDA_PHONE_PATTERN),
   apnName: z.string().min(2),
   apnId: z.string().min(2),
-  primaryMsisdn: z.string().regex(UGANDA_PHONE_PATTERN),
+  primaryMsisdn: optionalTrimmedString(z.string().regex(UGANDA_PHONE_PATTERN)),
 });
 
 const customerStatuses: CustomerStatus[] = ["active", "deactivated", "pending"];
@@ -38,6 +48,7 @@ export function GET(request: Request) {
         [
           customer.businessName,
           customer.registrationNumber,
+          customer.tin ?? "",
           customer.businessEmail,
           customer.businessPhone,
           customer.contactPerson,
@@ -62,8 +73,15 @@ export async function POST(request: Request) {
     return fail("Validation failed", 422);
   }
 
-  if (customers.some((customer) => customer.registrationNumber === parsed.data.registrationNumber)) {
+  if (
+    parsed.data.registrationNumber &&
+    customers.some((customer) => customer.registrationNumber === parsed.data.registrationNumber)
+  ) {
     return fail("A customer with this registration number already exists", 409);
+  }
+
+  if (parsed.data.tin && customers.some((customer) => customer.tin === parsed.data.tin)) {
+    return fail("A customer with this TIN already exists", 409);
   }
 
   const result = registerCustomer(parsed.data);

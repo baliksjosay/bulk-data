@@ -34,16 +34,47 @@ export interface ApiErrorEnvelope {
 
 export type ApiEnvelope<T> = ApiSuccessEnvelope<T> | ApiErrorEnvelope;
 
-export type AuthLoginMethod = "otp" | "password" | "passkey";
+export type AuthLoginMethod = "password" | "passkey";
+export type SocialLoginProvider = "google" | "microsoft";
 
 export type AuthRole = "admin" | "support" | "customer";
 export type StaffUserRole = "ADMIN" | "SUPPORT";
+export type UserAccountRole = "SUPER_ADMIN" | "ADMIN" | "CUSTOMER" | "SUPPORT";
+export type UserAccountStatus =
+  | "PENDING"
+  | "ACTIVE"
+  | "INACTIVE"
+  | "SUSPENDED"
+  | "LOCKED";
 
 export interface StaffUserCreateRequest {
-  phoneNumber: string;
   email: string;
-  lanId: string;
-  role: StaffUserRole;
+  phoneNumber?: string;
+  lanId?: string;
+  role?: StaffUserRole;
+}
+
+export interface StaffUserListQuery extends ListQuery {
+  role?: StaffUserRole | "";
+  status?: UserAccountStatus | "";
+}
+
+export interface UserAccountUpdateRequest {
+  firstName?: string;
+  lastName?: string;
+  phoneNumber?: string;
+  roles?: UserAccountRole[];
+  status?: UserAccountStatus;
+}
+
+export interface UserStatusUpdateRequest {
+  status: UserAccountStatus;
+  reason?: string;
+}
+
+export interface UserLockRequest {
+  minutes?: number;
+  reason?: string;
 }
 
 export interface UserAccount {
@@ -54,8 +85,8 @@ export interface UserAccount {
   phoneNumber?: string;
   authProvider: "LOCAL" | "GOOGLE" | "MICROSOFT" | "ACTIVE_DIRECTORY";
   externalId?: string;
-  roles: Array<"SUPER_ADMIN" | "ADMIN" | "CUSTOMER" | "SUPPORT">;
-  status: "PENDING" | "ACTIVE" | "INACTIVE" | "SUSPENDED" | "LOCKED";
+  roles: UserAccountRole[];
+  status: UserAccountStatus;
   emailVerified: boolean;
   isLocked: boolean;
   createdAt: string;
@@ -67,11 +98,17 @@ export interface AuthLoginRequest {
   identifier?: string;
   identifierKind?: "phone" | "email" | "tin";
   otp?: string;
+  challengeId?: string;
   email?: string;
   username?: string;
   phoneNumber?: string;
   password?: string;
   credentialId?: string;
+}
+
+export interface SocialLoginRequest {
+  idToken: string;
+  deviceId?: string;
 }
 
 export interface AuthenticatedUser {
@@ -124,11 +161,15 @@ export type AuthLoginResponse = AuthLoginResult | AuthMfaChallenge;
 
 export interface AccountActivationOtpRequest {
   token: string;
+  identifier: string;
+  deliveryChannel: "email" | "sms";
 }
 
 export interface AccountActivationOtpResult {
   activationId: string;
   maskedEmail: string;
+  maskedDestination?: string;
+  deliveryChannel?: "email" | "sms";
   expiresAt: string;
   retryAfterSeconds: number;
 }
@@ -150,49 +191,31 @@ export interface AccountActivationPasswordRequest {
   confirmPassword: string;
 }
 
-export type ProvisioningOperation =
-  | "add_group_member"
-  | "add_group_members_bulk"
-  | "delete_group_member"
-  | "update_subscription"
-  | "add_subscriber"
-  | "subscribe_service";
-
-export interface ProvisioningGroupMemberPair {
-  secondaryMsisdn: string;
-  primaryMsisdn: string;
+export interface PasswordPolicy {
+  appliesTo: "CUSTOMER_LOCAL";
+  maxPasswordAgeWarmBodiedDays: number;
+  maxPasswordAgeServiceAccountDays: number;
+  minPasswordAgeDays: number;
+  passwordHistoryCount: number;
+  minPasswordLength: number;
+  complexityEnabled: boolean;
+  hashingEnabled: boolean;
+  accountLockoutThreshold: number;
+  maxSessionsPerUser: number;
+  forcePasswordChangeAtFirstLogin: boolean;
+  inactiveAccountLockDays: number;
+  ssoAllowed: boolean;
+  mfaSupported: boolean;
+  leastPrivilegeEnabled: boolean;
+  rbacEnabled: boolean;
+  pamProvider: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
-export interface ProvisioningAddGroupMembersBulkRequest {
-  groupMembers: ProvisioningGroupMemberPair[];
-}
-
-export interface ProvisioningDeleteGroupMemberRequest {
-  secondaryMsisdn: string;
-}
-
-export interface ProvisioningUpdateSubscriptionRequest {
-  primaryMsisdn: string;
-  serviceCode: string;
-  transactionId: string;
-  topupValue: number;
-  updateAttemptCount: number;
-}
-
-export interface ProvisioningAddSubscriberRequest {
-  msisdn: string;
-  transactionId: string;
-}
-
-export interface ProvisioningCommandResult<TRequest> {
-  requestId: string;
-  operation: ProvisioningOperation;
-  accepted: boolean;
-  processedAt: string;
-  providerStatusCode: number;
-  request: TRequest;
-  providerResponse: Record<string, unknown> | null;
-}
+export type PasswordPolicyUpdate = Partial<
+  Omit<PasswordPolicy, "appliesTo" | "updatedAt" | "updatedBy">
+>;
 
 export interface PaginationMeta {
   page: number;
@@ -270,6 +293,7 @@ export interface Customer {
   id: string;
   businessName: string;
   registrationNumber: string;
+  tin?: string | null;
   businessEmail: string;
   businessPhone: string;
   contactPerson: string;
@@ -411,7 +435,7 @@ export interface PurchaseConfirmationResult {
     subscribeService: boolean;
     modifySubSubscription: boolean;
     srvTopupCount: number;
-    providerResult?: ProvisioningCommandResult<Record<string, unknown>>;
+    providerResult?: Record<string, unknown> | null;
   };
 }
 
@@ -439,7 +463,8 @@ export interface MsisdnValidationResult {
 
 export interface CustomerRegistrationRequest {
   businessName: string;
-  registrationNumber: string;
+  registrationNumber?: string;
+  tin?: string;
   businessEmail: string;
   businessPhone: string;
   contactPerson: string;
@@ -447,24 +472,26 @@ export interface CustomerRegistrationRequest {
   contactPhone: string;
   apnName: string;
   apnId: string;
-  primaryMsisdn: string;
+  primaryMsisdn?: string;
 }
 
 export interface CustomerActivationNotice {
   activationToken: string;
   activationUrl: string;
   expiresAt: string;
-  deliveryChannels: Array<"business_email" | "contact_email">;
+  deliveryChannels: Array<"business_email" | "contact_email" | "contact_phone">;
 }
 
 export interface CustomerRegistrationResult {
   customer: Customer;
-  validation: MsisdnValidationResult;
-  activation: CustomerActivationNotice;
+  validation?: MsisdnValidationResult;
+  activation?: CustomerActivationNotice;
+  portalUserId?: string;
 }
 
 export interface CustomerUpdateRequest {
   businessName?: string;
+  tin?: string;
   businessEmail?: string;
   businessPhone?: string;
   contactPerson?: string;
@@ -511,10 +538,8 @@ export interface ServiceRequestUpdateRequest {
 
 export type ServiceRequestConversionRequest = CustomerRegistrationRequest;
 
-export interface ServiceRequestConversionResult {
+export interface ServiceRequestConversionResult extends CustomerRegistrationResult {
   serviceRequest: ServiceRequest;
-  customer: Customer;
-  validation: MsisdnValidationResult;
 }
 
 export interface PrimaryMsisdnRequest {

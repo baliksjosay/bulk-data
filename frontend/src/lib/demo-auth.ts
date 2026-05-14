@@ -1,29 +1,11 @@
-import { customers } from "@/lib/fake-db";
+import { customers, staffUsers } from "@/lib/fake-db";
 import type {
   AuthLoginRequest,
   AuthLoginResult,
-  AuthRole,
   AuthenticatedUser,
   Customer,
+  UserAccount,
 } from "@/types/domain";
-
-const demoStaffUsers: Record<
-  Exclude<AuthRole, "customer">,
-  AuthenticatedUser
-> = {
-  admin: {
-    id: "usr-admin-001",
-    name: "Security Admin",
-    email: "admin@mtn.co.ug",
-    role: "admin",
-  },
-  support: {
-    id: "usr-support-001",
-    name: "Support Operations",
-    email: "support@mtn.co.ug",
-    role: "support",
-  },
-};
 
 const demoPasswordsByEmail: Record<string, string> = {
   "baliksjosay@gmail.com": "kimbowa",
@@ -43,6 +25,83 @@ export function customerToAuthenticatedUser(
     role: "customer",
     customerId: customer.id,
   };
+}
+
+function staffAccountToAuthenticatedUser(user: UserAccount): AuthenticatedUser {
+  return {
+    id: user.id,
+    name: [user.firstName, user.lastName].filter(Boolean).join(" "),
+    email: user.email,
+    role: user.roles.includes("SUPPORT") ? "support" : "admin",
+  };
+}
+
+function getPasswordIdentifier(payload: AuthLoginRequest) {
+  return (
+    payload.identifier ??
+    payload.email ??
+    payload.username ??
+    payload.phoneNumber ??
+    ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function isPrecreatedStaffUser(user: UserAccount) {
+  return (
+    user.authProvider === "ACTIVE_DIRECTORY" &&
+    user.status === "ACTIVE" &&
+    !user.isLocked &&
+    user.roles.some((role) =>
+      ["SUPER_ADMIN", "ADMIN", "SUPPORT"].includes(role),
+    )
+  );
+}
+
+function findPrecreatedStaffByLanId(rawIdentifier: string) {
+  const identifier = rawIdentifier.trim().toLowerCase();
+
+  if (!identifier || identifier.includes("@")) {
+    return null;
+  }
+
+  return (
+    staffUsers.find(
+      (user) =>
+        isPrecreatedStaffUser(user) &&
+        user.externalId?.trim().toLowerCase() === identifier,
+    ) ?? null
+  );
+}
+
+function findPrecreatedStaffByEmail(rawIdentifier: string) {
+  const identifier = rawIdentifier.trim().toLowerCase();
+
+  if (!identifier.includes("@")) {
+    return null;
+  }
+
+  return (
+    staffUsers.find(
+      (user) =>
+        isPrecreatedStaffUser(user) && user.email.toLowerCase() === identifier,
+    ) ?? null
+  );
+}
+
+function findDemoStaffByRole(role: "admin" | "support") {
+  return (
+    staffUsers.find((user) => {
+      if (!isPrecreatedStaffUser(user)) {
+        return false;
+      }
+
+      return role === "support"
+        ? user.roles.includes("SUPPORT")
+        : user.roles.includes("ADMIN") || user.roles.includes("SUPER_ADMIN");
+    }) ?? null
+  );
 }
 
 export function makeLoginResult(
@@ -75,27 +134,15 @@ export function resolveDemoLoginUser(
   payload: AuthLoginRequest,
 ): AuthenticatedUser {
   if (payload.method === "password") {
-    const email =
-      (payload.email ?? payload.username ?? payload.phoneNumber)
-        ?.trim()
-        .toLowerCase() ?? "";
+    const identifier = getPasswordIdentifier(payload);
+    const staffUser = findPrecreatedStaffByLanId(identifier);
 
-    if (email.includes("admin")) {
-      return demoStaffUsers.admin;
-    }
-
-    if (email.includes("support")) {
-      return demoStaffUsers.support;
+    if (staffUser) {
+      return staffAccountToAuthenticatedUser(staffUser);
     }
 
     return customerToAuthenticatedUser(
-      findCustomerByIdentifier(email) ?? customers[0],
-    );
-  }
-
-  if (payload.method === "otp") {
-    return customerToAuthenticatedUser(
-      findCustomerByIdentifier(payload.identifier ?? "") ?? customers[0],
+      findCustomerByIdentifier(identifier) ?? customers[0],
     );
   }
 
@@ -103,11 +150,19 @@ export function resolveDemoLoginUser(
     const credentialId = payload.credentialId?.trim().toLowerCase() ?? "";
 
     if (credentialId.includes("admin") || credentialId.includes("ops")) {
-      return demoStaffUsers.admin;
+      const staffUser = findDemoStaffByRole("admin");
+
+      if (staffUser) {
+        return staffAccountToAuthenticatedUser(staffUser);
+      }
     }
 
     if (credentialId.includes("support")) {
-      return demoStaffUsers.support;
+      const staffUser = findDemoStaffByRole("support");
+
+      if (staffUser) {
+        return staffAccountToAuthenticatedUser(staffUser);
+      }
     }
   }
 
@@ -117,12 +172,19 @@ export function resolveDemoLoginUser(
 export function resolveDemoPasswordLoginUser(
   payload: AuthLoginRequest,
 ): AuthenticatedUser | null {
+  const identifier = getPasswordIdentifier(payload);
+  const staffUser = findPrecreatedStaffByLanId(identifier);
+
+  if (staffUser) {
+    return staffAccountToAuthenticatedUser(staffUser);
+  }
+
+  if (findPrecreatedStaffByEmail(identifier)) {
+    return null;
+  }
+
   const user = resolveDemoLoginUser(payload);
-  const email =
-    (payload.email ?? payload.username ?? payload.phoneNumber)
-      ?.trim()
-      .toLowerCase() ?? "";
-  const expectedPassword = demoPasswordsByEmail[email];
+  const expectedPassword = demoPasswordsByEmail[identifier];
 
   if (expectedPassword && payload.password !== expectedPassword) {
     return null;
@@ -165,6 +227,7 @@ function findCustomerByIdentifier(rawIdentifier: string) {
       customer.email.toLowerCase() === identifier ||
       customer.businessEmail.toLowerCase() === identifier ||
       customer.registrationNumber.toLowerCase() === identifier ||
+      customer.tin?.toLowerCase() === identifier ||
       businessPhoneDigits === phoneDigits ||
       contactPhoneDigits === phoneDigits
     );

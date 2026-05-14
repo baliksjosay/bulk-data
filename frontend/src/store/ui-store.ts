@@ -6,6 +6,8 @@ import { persist } from "zustand/middleware";
 export type AppSection =
   | "overview"
   | "admin"
+  | "service-requests"
+  | "users"
   | "packages"
   | "customer"
   | "reports"
@@ -30,7 +32,10 @@ interface UiState {
   setActiveSection: (section: AppSection) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setTheme: (theme: ThemePreference) => void;
-  setSelectedCustomerContext: (customerId: string, primaryMsisdn?: string) => void;
+  setSelectedCustomerContext: (
+    customerId: string,
+    primaryMsisdn?: string,
+  ) => void;
   setSelectedPrimaryMsisdn: (primaryMsisdn: string) => void;
 }
 
@@ -45,9 +50,12 @@ export const useUiStore = create<UiState>()(
       setActiveSection: (activeSection) => set({ activeSection }),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       setTheme: (theme) => set({ theme }),
-      setSelectedCustomerContext: (selectedCustomerId, selectedPrimaryMsisdn = "") =>
-        set({ selectedCustomerId, selectedPrimaryMsisdn }),
-      setSelectedPrimaryMsisdn: (selectedPrimaryMsisdn) => set({ selectedPrimaryMsisdn }),
+      setSelectedCustomerContext: (
+        selectedCustomerId,
+        selectedPrimaryMsisdn = "",
+      ) => set({ selectedCustomerId, selectedPrimaryMsisdn }),
+      setSelectedPrimaryMsisdn: (selectedPrimaryMsisdn) =>
+        set({ selectedPrimaryMsisdn }),
     }),
     {
       name: "mtn-bds-ui",

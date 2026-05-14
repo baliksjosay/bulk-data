@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,12 +47,20 @@ import { AuditPage } from "@/features/dashboard/audit-page";
 import { DashboardPage } from "@/features/dashboard/dashboard-page";
 import { PackageManagementPage } from "@/features/packages/package-management-page";
 import { PreferencesPanel } from "@/features/preferences/preferences-panel";
-import { ReportsPage } from "@/features/reports/reports-page";
+import {
+  ReportsPage,
+  ServiceRequestsPage,
+} from "@/features/reports/reports-page";
 import { SecuritySettings } from "@/features/security/security-settings";
-import { api } from "@/lib/api-client";
-import { clearAuthSession, useAuthSessionSnapshot } from "@/lib/auth-session";
+import { UserManagementPage } from "@/features/users/user-management-page";
+import { api, formatRetryAfter, isRateLimitError } from "@/lib/api-client";
+import { clearAuthSession, persistAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/cn";
 import { formatDateTime, sentenceCase } from "@/lib/format";
+import {
+  markAllNotificationsReadInCache,
+  markNotificationsReadInCache,
+} from "@/lib/notification-cache";
 import {
   type AppSection,
   type ReportSection,
@@ -79,8 +87,20 @@ const sections: Array<{
   },
   {
     id: "admin",
-    label: "Accounts",
+    label: "Customers",
     icon: MonitorCog,
+    roles: ["admin", "support"],
+  },
+  {
+    id: "service-requests",
+    label: "Service Requests",
+    icon: FileClock,
+    roles: ["admin", "support"],
+  },
+  {
+    id: "users",
+    label: "Users",
+    icon: UserRound,
     roles: ["admin", "support"],
   },
   { id: "packages", label: "Packages", icon: Package, roles: ["admin"] },
@@ -129,14 +149,6 @@ const reportSections: Array<{
     roles: ["admin", "support"],
   },
   {
-    id: "report-service-requests",
-    label: "Service Requests",
-    description: "Public requests and customer conversion",
-    group: "Operations",
-    icon: FileClock,
-    roles: ["admin", "support"],
-  },
-  {
     id: "report-customer-activity",
     label: "Customer Activity",
     description: "Customer lifecycle, spend, and status",
@@ -173,6 +185,7 @@ const reportSections: Array<{
 const appSectionIds = new Set<AppSection>([
   ...sections.map((section) => section.id),
   ...reportSections.map((section) => section.id),
+  "report-service-requests",
 ]);
 
 const inactiveNavigationButtonClass =
@@ -189,19 +202,39 @@ function isAppSection(value: string | null): value is AppSection {
   return Boolean(value && appSectionIds.has(value as AppSection));
 }
 
+function normalizeAppSection(section: AppSection): AppSection {
+  return section === "report-service-requests" ? "service-requests" : section;
+}
+
 function normalizeReportSection(section: AppSection): ReportSection {
   return section.startsWith("report-")
     ? (section as ReportSection)
     : "report-transactions";
 }
 
-function renderSection(activeSection: AppSection, currentRole: AuthRole) {
+function renderSection(
+  activeSection: AppSection,
+  currentUser: AuthenticatedUser,
+) {
+  const currentRole = currentUser.role;
+
   if (activeSection === "overview") {
     return <DashboardPage />;
   }
 
   if (activeSection === "admin") {
     return <AdminWorkspace currentRole={currentRole} />;
+  }
+
+  if (
+    activeSection === "service-requests" ||
+    activeSection === "report-service-requests"
+  ) {
+    return <ServiceRequestsPage />;
+  }
+
+  if (activeSection === "users") {
+    return <UserManagementPage currentUser={currentUser} />;
   }
 
   if (activeSection === "packages") {
@@ -328,36 +361,59 @@ function notificationToneClass(
 
 function NotificationsMenu({ user }: { user: AuthenticatedUser }) {
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
   const notificationQueryKey = ["notifications", user.id] as const;
   const unreadCountQueryKey = ["notifications-unread-count", user.id] as const;
   const notificationsQuery = useQuery({
     queryKey: [...notificationQueryKey, { limit: 8 }],
     queryFn: () => api.notifications({ limit: 8 }),
-    refetchInterval: 30_000,
+    enabled: open,
+    retry: false,
+    refetchOnMount: false,
+    staleTime: 5 * 60 * 1000,
   });
   const unreadCountQuery = useQuery({
     queryKey: unreadCountQueryKey,
     queryFn: api.unreadNotificationsCount,
-    refetchInterval: 30_000,
+    enabled: open,
+    retry: false,
+    refetchOnMount: false,
+    staleTime: 5 * 60 * 1000,
   });
+  const rateLimitError =
+    [notificationsQuery.error, unreadCountQuery.error].find(isRateLimitError) ??
+    null;
   const notifications = notificationsQuery.data?.data ?? [];
   const unreadCount =
     unreadCountQuery.data?.count ??
     notifications.filter((notification) => !notification.isRead).length;
-
-  function refreshNotifications() {
-    void queryClient.invalidateQueries({ queryKey: notificationQueryKey });
-    void queryClient.invalidateQueries({ queryKey: unreadCountQueryKey });
-  }
+  const notificationErrorMessage = rateLimitError
+    ? `Too many notification requests. Try again in ${formatRetryAfter(
+        rateLimitError.retryAfterSeconds,
+      )}.`
+    : "Notifications unavailable";
+  const notificationsUnavailable =
+    Boolean(rateLimitError) ||
+    notificationsQuery.isError ||
+    unreadCountQuery.isError;
 
   const markReadMutation = useMutation({
     mutationFn: (notificationIds: string[]) =>
       api.markNotificationsRead(notificationIds),
-    onSuccess: refreshNotifications,
+    onSuccess: (result, notificationIds) => {
+      markNotificationsReadInCache(
+        queryClient,
+        user.id,
+        notificationIds,
+        result.updated,
+      );
+    },
   });
   const markAllReadMutation = useMutation({
     mutationFn: api.markAllNotificationsRead,
-    onSuccess: refreshNotifications,
+    onSuccess: () => {
+      markAllNotificationsReadInCache(queryClient, user.id);
+    },
   });
 
   function openNotification(notification: InAppNotification) {
@@ -373,7 +429,7 @@ function NotificationsMenu({ user }: { user: AuthenticatedUser }) {
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
@@ -408,7 +464,11 @@ function NotificationsMenu({ user }: { user: AuthenticatedUser }) {
             size="sm"
             title="Mark all read"
             aria-label="Mark all read"
-            disabled={unreadCount === 0 || markAllReadMutation.isPending}
+            disabled={
+              unreadCount === 0 ||
+              Boolean(rateLimitError) ||
+              markAllReadMutation.isPending
+            }
             onClick={() => markAllReadMutation.mutate()}
             className={headerIconButtonClass}
           >
@@ -417,10 +477,10 @@ function NotificationsMenu({ user }: { user: AuthenticatedUser }) {
         </div>
 
         <div className="max-h-[22rem] overflow-y-auto p-1">
-          {notificationsQuery.isError ? (
+          {notificationsUnavailable ? (
             <div className="grid gap-2 px-4 py-8 text-center text-sm text-[var(--muted)]">
               <Inbox className="mx-auto h-5 w-5" />
-              Notifications unavailable
+              {notificationErrorMessage}
             </div>
           ) : notifications.length === 0 ? (
             <div className="grid gap-2 px-4 py-8 text-center text-sm text-[var(--muted)]">
@@ -677,7 +737,7 @@ function BrandMark({ className }: { className?: string }) {
         width={56}
         height={24}
         className="block h-6 w-auto dark:hidden"
-        style={{ width: "auto" }}
+        style={{ width: "auto", height: "auto" }}
         priority
       />
       <Image
@@ -686,7 +746,7 @@ function BrandMark({ className }: { className?: string }) {
         width={56}
         height={24}
         className="hidden h-6 w-auto dark:block"
-        style={{ width: "auto" }}
+        style={{ width: "auto", height: "auto" }}
         priority
       />
     </div>
@@ -694,14 +754,21 @@ function BrandMark({ className }: { className?: string }) {
 }
 
 export function AppShell() {
-  const authSession = useAuthSessionSnapshot();
+  const restoreSessionQuery = useQuery({
+    queryKey: ["auth-session", "restore"],
+    queryFn: api.currentAuthSession,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
   const activeSection = useUiStore((state) => state.activeSection);
   const setActiveSection = useUiStore((state) => state.setActiveSection);
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useUiStore((state) => state.setSidebarCollapsed);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
-  const currentUser = authSession?.user ?? null;
+  const currentUser = restoreSessionQuery.data?.user ?? null;
   const currentRole = currentUser?.role ?? "customer";
   const visibleSections = sections.filter((section) =>
     section.roles.includes(currentRole),
@@ -714,19 +781,29 @@ export function AppShell() {
     ...visibleReportSections.map((section) => section.id),
   ]);
   const fallbackSection = visibleSections[0]?.id ?? "overview";
-  const effectiveActiveSection = allowedSectionIds.has(activeSection)
-    ? activeSection
+  const requestedActiveSection = normalizeAppSection(activeSection);
+  const effectiveActiveSection = allowedSectionIds.has(requestedActiveSection)
+    ? requestedActiveSection
     : fallbackSection;
   const reportActive = isReportSection(effectiveActiveSection);
   const [reportsMenuOpen, setReportsMenuOpen] = useState(reportActive);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileReportsOpen, setMobileReportsOpen] = useState(reportActive);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(64);
 
   useEffect(() => {
-    if (authSession === null) {
+    if (restoreSessionQuery.data) {
+      persistAuthSession(restoreSessionQuery.data);
+    }
+  }, [restoreSessionQuery.data]);
+
+  useEffect(() => {
+    if (restoreSessionQuery.isError) {
+      clearAuthSession();
       window.location.replace("/auth/login");
     }
-  }, [authSession]);
+  }, [restoreSessionQuery.isError]);
 
   useEffect(() => {
     const prefersDark = window.matchMedia(
@@ -741,10 +818,39 @@ export function AppShell() {
     const section = new URLSearchParams(window.location.search).get("section");
 
     if (isAppSection(section)) {
-      setActiveSection(section);
+      setActiveSection(normalizeAppSection(section));
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [setActiveSection]);
+
+  useEffect(() => {
+    const header = headerRef.current;
+
+    if (!header) {
+      return;
+    }
+
+    const updateHeaderHeight = () => {
+      setHeaderHeight(Math.ceil(header.getBoundingClientRect().height));
+    };
+
+    updateHeaderHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateHeaderHeight);
+
+      return () => {
+        window.removeEventListener("resize", updateHeaderHeight);
+      };
+    }
+
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(header);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (activeSection !== effectiveActiveSection) {
@@ -753,16 +859,37 @@ export function AppShell() {
   }, [activeSection, effectiveActiveSection, setActiveSection]);
 
   if (!currentUser) {
-    return <BrandLoader fullScreen label="Loading secure workspace" />;
+    return (
+      <BrandLoader
+        fullScreen
+        label={
+          restoreSessionQuery.isLoading || restoreSessionQuery.isFetching
+            ? "Restoring secure workspace"
+            : "Loading secure workspace"
+        }
+      />
+    );
   }
 
   function handleSignOut() {
-    clearAuthSession();
-    window.location.assign("/auth/login");
+    void api
+      .logout()
+      .catch(() => undefined)
+      .finally(() => {
+        clearAuthSession();
+        window.location.replace("/auth/login");
+      });
   }
 
+  const shellStyle = {
+    "--console-header-height": `${headerHeight}px`,
+  } as CSSProperties;
+
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+    <div
+      className="min-h-screen bg-[var(--background)] text-[var(--foreground)]"
+      style={shellStyle}
+    >
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-[70] hidden flex-col overflow-visible border-r border-[var(--border)] bg-[var(--panel)] transition-all lg:flex",
@@ -884,7 +1011,10 @@ export function AppShell() {
           sidebarCollapsed ? "lg:pl-20" : "lg:pl-72",
         )}
       >
-        <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--panel)]/95 px-3 py-3 backdrop-blur sm:px-4">
+        <header
+          ref={headerRef}
+          className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--panel)]/95 px-3 py-3 backdrop-blur sm:px-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Button
@@ -975,7 +1105,7 @@ export function AppShell() {
         </header>
 
         <main className="w-full min-w-0 px-2 py-3 sm:px-3 md:px-4">
-          {renderSection(effectiveActiveSection, currentRole)}
+          {renderSection(effectiveActiveSection, currentUser)}
         </main>
       </div>
     </div>
