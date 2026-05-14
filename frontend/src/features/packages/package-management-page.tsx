@@ -1,10 +1,23 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CheckCircle2, Eye, EyeOff, PackagePlus, Pencil, RotateCcw, Save } from "lucide-react";
+import {
+  Ban,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  PackagePlus,
+  Pencil,
+  RotateCcw,
+  Save,
+} from "lucide-react";
 import { useMemo, useState, type ComponentType } from "react";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumn, type DataTableRowAction } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRowAction,
+} from "@/components/ui/data-table";
 import { SelectField, TextField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
 import { Panel } from "@/components/ui/panel";
@@ -13,7 +26,11 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/cn";
 import { formatDateTime, formatUgx, sentenceCase } from "@/lib/format";
-import type { BundleOffer, BundlePackageRequest, BundleStatus } from "@/types/domain";
+import type {
+  BundleOffer,
+  BundlePackageRequest,
+  BundleStatus,
+} from "@/types/domain";
 
 type PackageForm = {
   serviceCode: string;
@@ -88,14 +105,46 @@ function toPackageForm(bundle: BundleOffer): PackageForm {
 
 function toPackagePayload(form: PackageForm): BundlePackageRequest {
   return {
-    serviceCode: form.serviceCode,
-    name: form.name,
+    serviceCode: form.serviceCode.trim().toUpperCase(),
+    name: form.name.trim(),
     volumeTb: Number(form.volumeTb),
     priceUgx: Number(form.priceUgx),
     validityDays: Number(form.validityDays),
     status: form.status,
     visible: form.visible,
   };
+}
+
+function validatePackagePayload(payload: BundlePackageRequest): string {
+  if (!payload.name) {
+    return "Package name is required.";
+  }
+
+  if (!payload.serviceCode) {
+    return "Service code is required.";
+  }
+
+  if (
+    !Number.isFinite(payload.volumeTb) ||
+    payload.volumeTb < 0.01 ||
+    payload.volumeTb > 4
+  ) {
+    return "Volume must be between 0.01 TB and 4 TB.";
+  }
+
+  if (!Number.isInteger(payload.priceUgx) || payload.priceUgx < 1) {
+    return "Price must be a whole UGX amount greater than zero.";
+  }
+
+  if (
+    !Number.isInteger(payload.validityDays) ||
+    payload.validityDays < 1 ||
+    payload.validityDays > 365
+  ) {
+    return "Validity must be between 1 and 365 days.";
+  }
+
+  return "";
 }
 
 function statusTone(status: BundleStatus) {
@@ -112,9 +161,13 @@ function statusTone(status: BundleStatus) {
 
 export function PackageManagementPage() {
   const queryClient = useQueryClient();
-  const packagesQuery = useQuery({ queryKey: ["bundle-packages"], queryFn: api.bundlePackages });
+  const packagesQuery = useQuery({
+    queryKey: ["bundle-packages"],
+    queryFn: api.bundlePackages,
+  });
   const [editingPackageId, setEditingPackageId] = useState("");
   const [form, setForm] = useState<PackageForm>(emptyPackageForm);
+  const [formError, setFormError] = useState("");
 
   const selectedPackage = useMemo(
     () => packagesQuery.data?.find((bundle) => bundle.id === editingPackageId),
@@ -126,9 +179,12 @@ export function PackageManagementPage() {
 
     return {
       total: packages.length,
-      activeVisible: packages.filter((bundle) => bundle.status === "active" && bundle.visible).length,
+      activeVisible: packages.filter(
+        (bundle) => bundle.status === "active" && bundle.visible,
+      ).length,
       hidden: packages.filter((bundle) => !bundle.visible).length,
-      disabled: packages.filter((bundle) => bundle.status === "disabled").length,
+      disabled: packages.filter((bundle) => bundle.status === "disabled")
+        .length,
     };
   }, [packagesQuery.data]);
 
@@ -149,14 +205,20 @@ export function PackageManagementPage() {
     },
   });
   const updateMutation = useMutation({
-    mutationFn: (payload: BundlePackageRequest) => api.updateBundlePackage(editingPackageId, payload),
+    mutationFn: (payload: BundlePackageRequest) =>
+      api.updateBundlePackage(editingPackageId, payload),
     onSuccess: async () => {
       await invalidatePackages();
     },
   });
   const quickUpdateMutation = useMutation({
-    mutationFn: ({ bundleId, payload }: { bundleId: string; payload: Partial<BundlePackageRequest> }) =>
-      api.updateBundlePackage(bundleId, payload),
+    mutationFn: ({
+      bundleId,
+      payload,
+    }: {
+      bundleId: string;
+      payload: Partial<BundlePackageRequest>;
+    }) => api.updateBundlePackage(bundleId, payload),
     onSuccess: invalidatePackages,
   });
 
@@ -195,14 +257,22 @@ export function PackageManagementPage() {
       header: "Visibility",
       exportValue: (bundle) => (bundle.visible ? "Visible" : "Hidden"),
       cell: (bundle) => (
-        <StatusBadge label={bundle.visible ? "Visible" : "Hidden"} tone={bundle.visible ? "blue" : "neutral"} />
+        <StatusBadge
+          label={bundle.visible ? "Visible" : "Hidden"}
+          tone={bundle.visible ? "blue" : "neutral"}
+        />
       ),
     },
     {
       id: "status",
       header: "Status",
       exportValue: (bundle) => sentenceCase(bundle.status),
-      cell: (bundle) => <StatusBadge label={sentenceCase(bundle.status)} tone={statusTone(bundle.status)} />,
+      cell: (bundle) => (
+        <StatusBadge
+          label={sentenceCase(bundle.status)}
+          tone={statusTone(bundle.status)}
+        />
+      ),
     },
     {
       id: "updatedAt",
@@ -212,7 +282,9 @@ export function PackageManagementPage() {
     },
   ];
 
-  function resolvePackageRowActions(bundle: BundleOffer): Array<DataTableRowAction<BundleOffer>> {
+  function resolvePackageRowActions(
+    bundle: BundleOffer,
+  ): Array<DataTableRowAction<BundleOffer>> {
     return [
       {
         id: "edit-package",
@@ -237,27 +309,35 @@ export function PackageManagementPage() {
       },
       {
         id: "toggle-disabled",
-        label: bundle.status === "disabled" ? "Enable package" : "Disable package",
+        label:
+          bundle.status === "disabled" ? "Enable package" : "Disable package",
         icon: bundle.status === "disabled" ? CheckCircle2 : Ban,
         variant: bundle.status === "disabled" ? "default" : "destructive",
         disabled: quickUpdateMutation.isPending,
         onSelect: () => {
           quickUpdateMutation.mutate({
             bundleId: bundle.id,
-            payload: { status: bundle.status === "disabled" ? "active" : "disabled" },
+            payload: {
+              status: bundle.status === "disabled" ? "active" : "disabled",
+            },
           });
         },
       },
     ];
   }
 
-  function updateField<Key extends keyof PackageForm>(key: Key, value: PackageForm[Key]) {
+  function updateField<Key extends keyof PackageForm>(
+    key: Key,
+    value: PackageForm[Key],
+  ) {
     setForm((current) => ({ ...current, [key]: value }));
+    setFormError("");
   }
 
   function resetForm() {
     setEditingPackageId("");
     setForm(emptyPackageForm);
+    setFormError("");
   }
 
   if (packagesQuery.isLoading) {
@@ -276,29 +356,69 @@ export function PackageManagementPage() {
         <div>
           <h2 className="text-2xl font-semibold">Package Management</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Configure wholesale bundle packages, customer visibility, and purchasing availability.
+            Configure wholesale bundle packages, customer visibility, and
+            purchasing availability.
           </p>
         </div>
-        {selectedPackage && <StatusBadge label={`Editing ${selectedPackage.serviceCode}`} tone="blue" />}
+        {selectedPackage && (
+          <StatusBadge
+            label={`Editing ${selectedPackage.serviceCode}`}
+            tone="blue"
+          />
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <SummaryPanel label="Total packages" value={summary.total} badgeLabel="Catalog" badgeTone="blue" tone="yellow" icon={PackagePlus} />
-        <SummaryPanel label="Visible active" value={summary.activeVisible} badgeLabel="Purchasable" badgeTone="green" tone="green" icon={CheckCircle2} />
-        <SummaryPanel label="Hidden" value={summary.hidden} badgeLabel="Hidden" badgeTone="neutral" tone="blue" icon={EyeOff} />
-        <SummaryPanel label="Disabled" value={summary.disabled} badgeLabel="Blocked" badgeTone="red" tone="red" icon={Ban} />
+        <SummaryPanel
+          label="Total packages"
+          value={summary.total}
+          badgeLabel="Catalog"
+          badgeTone="blue"
+          tone="yellow"
+          icon={PackagePlus}
+        />
+        <SummaryPanel
+          label="Visible active"
+          value={summary.activeVisible}
+          badgeLabel="Purchasable"
+          badgeTone="green"
+          tone="green"
+          icon={CheckCircle2}
+        />
+        <SummaryPanel
+          label="Hidden"
+          value={summary.hidden}
+          badgeLabel="Hidden"
+          badgeTone="neutral"
+          tone="blue"
+          icon={EyeOff}
+        />
+        <SummaryPanel
+          label="Disabled"
+          value={summary.disabled}
+          badgeLabel="Blocked"
+          badgeTone="red"
+          tone="red"
+          icon={Ban}
+        />
       </div>
 
       <Panel>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="font-semibold">{editingPackageId ? "Edit Package" : "Add Package"}</h3>
+            <h3 className="font-semibold">
+              {editingPackageId ? "Edit Package" : "Add Package"}
+            </h3>
             <p className="mt-1 text-sm text-[var(--muted)]">
               Changes affect package availability in customer purchase flows.
             </p>
           </div>
-          {createMutation.isSuccess && !editingPackageId && <StatusBadge label="Created" tone="green" />}
-          {updateMutation.isSuccess && editingPackageId && <StatusBadge label="Updated" tone="green" />}
+          {createMutation.isSuccess && !editingPackageId && (
+            <StatusBadge label="Created" tone="green" />
+          )}
+          {updateMutation.isSuccess && editingPackageId && (
+            <StatusBadge label="Updated" tone="green" />
+          )}
         </div>
 
         <form
@@ -306,6 +426,12 @@ export function PackageManagementPage() {
           onSubmit={(event) => {
             event.preventDefault();
             const payload = toPackagePayload(form);
+            const validationMessage = validatePackagePayload(payload);
+
+            if (validationMessage) {
+              setFormError(validationMessage);
+              return;
+            }
 
             if (editingPackageId) {
               updateMutation.mutate(payload);
@@ -359,7 +485,9 @@ export function PackageManagementPage() {
             label="Status"
             required
             value={form.status}
-            onValueChange={(value) => updateField("status", value as BundleStatus)}
+            onValueChange={(value) =>
+              updateField("status", value as BundleStatus)
+            }
             options={statusOptions}
           />
 
@@ -373,9 +501,13 @@ export function PackageManagementPage() {
           </Label>
 
           <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] pt-4 md:col-span-2 xl:col-span-6">
-            {(createMutation.isError || updateMutation.isError) && (
+            {(formError ||
+              createMutation.isError ||
+              updateMutation.isError) && (
               <p className="mr-auto text-sm font-medium text-coral">
-                {createMutation.error?.message ?? updateMutation.error?.message}
+                {formError ||
+                  createMutation.error?.message ||
+                  updateMutation.error?.message}
               </p>
             )}
             <Button type="button" variant="secondary" onClick={resetForm}>
@@ -383,8 +515,16 @@ export function PackageManagementPage() {
               Reset
             </Button>
             <Button type="submit" variant="primary" disabled={isSaving}>
-              {editingPackageId ? <Save className="h-4 w-4" /> : <PackagePlus className="h-4 w-4" />}
-              {isSaving ? "Saving..." : editingPackageId ? "Save Package" : "Add Package"}
+              {editingPackageId ? (
+                <Save className="h-4 w-4" />
+              ) : (
+                <PackagePlus className="h-4 w-4" />
+              )}
+              {isSaving
+                ? "Saving..."
+                : editingPackageId
+                  ? "Save Package"
+                  : "Add Package"}
             </Button>
           </div>
         </form>
@@ -403,7 +543,9 @@ export function PackageManagementPage() {
           rowActions={resolvePackageRowActions}
         />
         {quickUpdateMutation.isError && (
-          <p className="mt-3 text-sm font-medium text-coral">{quickUpdateMutation.error.message}</p>
+          <p className="mt-3 text-sm font-medium text-coral">
+            {quickUpdateMutation.error.message}
+          </p>
         )}
       </Panel>
     </div>
@@ -431,7 +573,12 @@ function SummaryPanel({
     <Panel className={cn("min-h-28 border shadow-sm", theme.card)}>
       <div className="flex items-start justify-between gap-3">
         <p className={cn("text-sm font-medium", theme.label)}>{label}</p>
-        <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-md", theme.icon)}>
+        <div
+          className={cn(
+            "grid h-10 w-10 shrink-0 place-items-center rounded-md",
+            theme.icon,
+          )}
+        >
           <Icon className="h-5 w-5" />
         </div>
       </div>

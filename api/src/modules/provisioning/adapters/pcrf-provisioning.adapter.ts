@@ -9,6 +9,11 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { firstValueFrom } from 'rxjs';
+import {
+  durationSince,
+  integrationTargetHost,
+  logIntegrationEvent,
+} from 'src/common/logging/integration-logger';
 import { AddGroupMemberDto } from '../dto/add-group-member.dto';
 import { AddGroupMembersBulkDto } from '../dto/add-group-members-bulk.dto';
 import { AddSubscriberDto } from '../dto/add-subscriber.dto';
@@ -95,6 +100,17 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
     const targetUrl = this.getEndpointTargetUrl(endpoint);
     const timeout =
       this.configService.get<number>('provisioning.pcrf.timeoutMs') ?? 15000;
+    const startedAt = Date.now();
+    const targetHost = integrationTargetHost(targetUrl);
+
+    logIntegrationEvent(this.logger, {
+      provider: 'pcrf',
+      operation: endpoint,
+      outcome: 'started',
+      requestId,
+      targetHost,
+      context: { timeoutMs: timeout },
+    });
 
     try {
       const response = await firstValueFrom(
@@ -107,6 +123,16 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
       const accepted = this.isPcrfSuccess(body);
 
       if (!accepted) {
+        logIntegrationEvent(this.logger, {
+          provider: 'pcrf',
+          operation: endpoint,
+          outcome: 'failed',
+          requestId,
+          targetHost,
+          statusCode: response.status,
+          durationMs: durationSince(startedAt),
+          errorMessage: 'Provider rejected request',
+        });
         this.logger.warn(
           `[${requestId}] PCRF rejected ${endpoint}: ${this.buildPcrfFailureReason(body)}`,
         );
@@ -114,6 +140,16 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
           'Provisioning upstream rejected the request',
         );
       }
+
+      logIntegrationEvent(this.logger, {
+        provider: 'pcrf',
+        operation: endpoint,
+        outcome: 'succeeded',
+        requestId,
+        targetHost,
+        statusCode: response.status,
+        durationMs: durationSince(startedAt),
+      });
 
       return {
         statusCode: response.status,
@@ -133,12 +169,33 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
         const providerStatus = error.response?.status;
 
         if (error.code === 'ECONNABORTED') {
+          logIntegrationEvent(this.logger, {
+            provider: 'pcrf',
+            operation: endpoint,
+            outcome: 'failed',
+            requestId,
+            targetHost,
+            durationMs: durationSince(startedAt),
+            errorCode: error.code,
+            errorMessage: 'Provider request timed out',
+          });
           throw new GatewayTimeoutException(
             'Provisioning upstream request timed out',
           );
         }
 
         if (providerStatus) {
+          logIntegrationEvent(this.logger, {
+            provider: 'pcrf',
+            operation: endpoint,
+            outcome: 'failed',
+            requestId,
+            targetHost,
+            statusCode: providerStatus,
+            durationMs: durationSince(startedAt),
+            errorCode: error.code,
+            errorMessage: 'Provider returned non-success status',
+          });
           this.logger.warn(
             `[${requestId}] provisioning upstream rejected request with status ${providerStatus}`,
           );
@@ -148,6 +205,15 @@ export class PcrfProvisioningAdapter implements ProvisioningSystemAdapter {
         }
       }
 
+      logIntegrationEvent(this.logger, {
+        provider: 'pcrf',
+        operation: endpoint,
+        outcome: 'failed',
+        requestId,
+        targetHost,
+        durationMs: durationSince(startedAt),
+        errorMessage: 'Provider unavailable',
+      });
       this.logger.error(`[${requestId}] provisioning upstream is unavailable`);
       throw new ServiceUnavailableException(
         'Provisioning upstream is unavailable',

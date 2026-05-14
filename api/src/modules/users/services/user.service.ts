@@ -21,6 +21,7 @@ import { UserRepository } from '../repositories/user.repository';
 import { UserPreferenceRepository } from '../repositories/user-preference.repository';
 import { RedisService } from '../../redis/redis.service';
 import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.interface';
+import { InitialAdminSeedService } from './initial-admin-seed.service';
 
 type DemoUserSeed = {
   firstName: string;
@@ -30,15 +31,6 @@ type DemoUserSeed = {
   externalId?: string;
   roles: UserRole[];
   password: string;
-};
-
-type BootstrapLocalAdminSeed = {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phoneNumber?: string;
-  password: string;
-  resetPassword: boolean;
 };
 
 type ManagedStaffRole = UserRole.ADMIN | UserRole.SUPPORT;
@@ -66,11 +58,12 @@ export class UserService implements OnModuleInit {
     private readonly userRepository: UserRepository,
     private readonly preferenceRepository: UserPreferenceRepository,
     private readonly redis: RedisService,
+    private readonly initialAdminSeedService: InitialAdminSeedService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     if (process.env.BOOTSTRAP_LOCAL_ADMIN === 'true') {
-      await this.seedBootstrapLocalAdmin();
+      await this.initialAdminSeedService.seedFromEnvironment();
     }
 
     if (process.env.SEED_DEMO_USERS === 'true') {
@@ -106,88 +99,6 @@ export class UserService implements OnModuleInit {
     const saved = await this.userRepository.save(user);
     await this.invalidateUserCaches(saved);
     return this.requireById(saved.id);
-  }
-
-  private getBootstrapLocalAdminSeed(): BootstrapLocalAdminSeed {
-    const email = process.env.BOOTSTRAP_LOCAL_ADMIN_EMAIL?.trim().toLowerCase();
-    const password = process.env.BOOTSTRAP_LOCAL_ADMIN_PASSWORD;
-
-    if (!email || !password) {
-      throw new BadRequestException(
-        'BOOTSTRAP_LOCAL_ADMIN_EMAIL and BOOTSTRAP_LOCAL_ADMIN_PASSWORD are required when BOOTSTRAP_LOCAL_ADMIN=true',
-      );
-    }
-
-    const names = this.deriveStaffNames(email, email.split('@')[0] || 'admin');
-
-    return {
-      firstName:
-        process.env.BOOTSTRAP_LOCAL_ADMIN_FIRST_NAME?.trim() ||
-        names.firstName ||
-        'Admin',
-      lastName:
-        process.env.BOOTSTRAP_LOCAL_ADMIN_LAST_NAME?.trim() ||
-        names.lastName ||
-        'User',
-      email,
-      phoneNumber: process.env.BOOTSTRAP_LOCAL_ADMIN_PHONE?.trim() || undefined,
-      password,
-      resetPassword:
-        process.env.BOOTSTRAP_LOCAL_ADMIN_RESET_PASSWORD === 'true',
-    };
-  }
-
-  private async seedBootstrapLocalAdmin(): Promise<void> {
-    const seed = this.getBootstrapLocalAdminSeed();
-    const existing = await this.userRepository.findByEmail(seed.email, true);
-
-    if (existing) {
-      const oldExternalId = existing.externalId;
-      const oldProvider = existing.authProvider;
-      existing.firstName = existing.firstName || seed.firstName;
-      existing.lastName = existing.lastName || seed.lastName;
-      existing.phoneNumber = existing.phoneNumber || seed.phoneNumber || null;
-      existing.authProvider = AuthProvider.LOCAL;
-      existing.roles = this.normalizeRoles([
-        ...existing.roles.filter((role) => role !== UserRole.CUSTOMER),
-        UserRole.ADMIN,
-      ]);
-      existing.status = UserStatus.ACTIVE;
-      existing.emailVerified = true;
-      existing.phoneVerified = Boolean(existing.phoneNumber);
-      existing.isLocked = false;
-      existing.failedLoginAttempts = 0;
-      existing.mfaEnabled = true;
-
-      if (!existing.password || seed.resetPassword) {
-        existing.password = await this.hashPassword(seed.password);
-      }
-
-      await this.userRepository.save(existing);
-      await this.invalidateUserCaches(existing, { oldExternalId, oldProvider });
-      return;
-    }
-
-    const user = this.userRepository.create({
-      firstName: seed.firstName,
-      lastName: seed.lastName,
-      email: seed.email,
-      phoneNumber: seed.phoneNumber ?? null,
-      authProvider: AuthProvider.LOCAL,
-      externalId: null,
-      roles: [UserRole.ADMIN],
-      status: UserStatus.ACTIVE,
-      emailVerified: true,
-      phoneVerified: Boolean(seed.phoneNumber),
-      isLocked: false,
-      failedLoginAttempts: 0,
-      mfaEnabled: true,
-      mfaVerified: false,
-      password: await this.hashPassword(seed.password),
-      preferences: this.preferenceRepository.createDefault(),
-    });
-
-    await this.userRepository.save(user);
   }
 
   private getDemoUserSeeds(): DemoUserSeed[] {

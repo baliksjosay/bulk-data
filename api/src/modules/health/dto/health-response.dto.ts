@@ -394,7 +394,7 @@ export class DetailedHealthResponseDto extends BasicHealthResponseDto {
     },
     required: false,
   })
-  externalServices?: Record<string, any>;
+  externalServices?: Record<string, unknown>;
 
   @ApiProperty({
     description: 'Application-specific health checks',
@@ -404,5 +404,5 @@ export class DetailedHealthResponseDto extends BasicHealthResponseDto {
     },
     required: false,
   })
-  services?: Record<string, any>;
+  services?: Record<string, unknown>;
 }

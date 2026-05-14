@@ -13,12 +13,26 @@ export type PaymentStatus =
 
 export type BundleStatus = "active" | "paused" | "disabled";
 
-export interface ApiEnvelope<T> {
-  success: boolean;
+export interface ApiValidationIssue {
+  field?: string;
+  message: string;
+}
+
+export interface ApiSuccessEnvelope<T> {
+  success: true;
   message: string;
   data: T;
   meta?: PaginationMeta;
 }
+
+export interface ApiErrorEnvelope {
+  success: false;
+  message: string;
+  data: null;
+  errors?: ApiValidationIssue[];
+}
+
+export type ApiEnvelope<T> = ApiSuccessEnvelope<T> | ApiErrorEnvelope;
 
 export type AuthLoginMethod = "otp" | "password" | "passkey";
 

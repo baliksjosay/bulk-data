@@ -19,7 +19,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumn, type DataTableRowAction } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumn,
+  type DataTableRowAction,
+} from "@/components/ui/data-table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +33,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { PhoneField, SelectField, TextareaField, TextField } from "@/components/ui/form-field";
+import {
+  PhoneField,
+  SelectField,
+  TextareaField,
+  TextField,
+} from "@/components/ui/form-field";
 import { Panel } from "@/components/ui/panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { PaymentCheckoutDialog } from "@/features/customer/payment-checkout-dialog";
@@ -38,7 +47,11 @@ import { useAuthSessionSnapshot } from "@/lib/auth-session";
 import { cn } from "@/lib/cn";
 import { formatDateTime, formatUgx, sentenceCase } from "@/lib/format";
 import { showPrimaryBalance, showSecondaryUsage } from "@/lib/table-actions";
-import { normalizeUgandaPhoneInput, UGANDA_PHONE_COUNTRY_CODE } from "@/lib/uganda-phone";
+import {
+  isUgandaPhoneNumber,
+  normalizeUgandaPhoneInput,
+  UGANDA_PHONE_COUNTRY_CODE,
+} from "@/lib/uganda-phone";
 import { useUiStore } from "@/store/ui-store";
 import type { Customer, ListQuery, SecondaryNumber } from "@/types/domain";
 
@@ -69,23 +82,60 @@ const customerDashboardCardThemes = {
   },
 };
 
+function parseBulkMsisdns(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(/[\s,]+/)
+        .map((item) => normalizeUgandaPhoneInput(item.trim()))
+        .filter((item) => isUgandaPhoneNumber(item)),
+    ),
+  ];
+}
+
+function parseProvisioningCount(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.min(12, Math.max(1, parsed));
+}
+
 export function CustomerPortal() {
   const authSession = useAuthSessionSnapshot();
-  const customersQuery = useQuery({ queryKey: ["customers"], queryFn: api.customers });
-  const bundlesQuery = useQuery({ queryKey: ["bundles"], queryFn: api.bundles });
+  const customersQuery = useQuery({
+    queryKey: ["customers"],
+    queryFn: api.customers,
+  });
+  const bundlesQuery = useQuery({
+    queryKey: ["bundles"],
+    queryFn: api.bundles,
+  });
   const selectedCustomerId = useUiStore((state) => state.selectedCustomerId);
-  const selectedPrimaryMsisdn = useUiStore((state) => state.selectedPrimaryMsisdn);
-  const setSelectedCustomerContext = useUiStore((state) => state.setSelectedCustomerContext);
-  const setSelectedPrimaryMsisdn = useUiStore((state) => state.setSelectedPrimaryMsisdn);
+  const selectedPrimaryMsisdn = useUiStore(
+    (state) => state.selectedPrimaryMsisdn,
+  );
+  const setSelectedCustomerContext = useUiStore(
+    (state) => state.setSelectedCustomerContext,
+  );
+  const setSelectedPrimaryMsisdn = useUiStore(
+    (state) => state.setSelectedPrimaryMsisdn,
+  );
   const isCustomerScoped = authSession?.user.role === "customer";
-  const scopedCustomerId = isCustomerScoped ? authSession?.user.customerId ?? "" : "";
+  const scopedCustomerId = isCustomerScoped
+    ? (authSession?.user.customerId ?? "")
+    : "";
   const visibleCustomers = useMemo(() => {
     if (!customersQuery.data) {
       return [];
     }
 
     if (isCustomerScoped && scopedCustomerId) {
-      return customersQuery.data.filter((customer) => customer.id === scopedCustomerId);
+      return customersQuery.data.filter(
+        (customer) => customer.id === scopedCustomerId,
+      );
     }
 
     return customersQuery.data;
@@ -93,11 +143,19 @@ export function CustomerPortal() {
   const selectedCustomer = useMemo(() => {
     const effectiveCustomerId = isCustomerScoped
       ? scopedCustomerId
-      : (selectedCustomerId || visibleCustomers[0]?.id);
-    return visibleCustomers.find((customer) => customer.id === effectiveCustomerId);
-  }, [isCustomerScoped, scopedCustomerId, selectedCustomerId, visibleCustomers]);
+      : selectedCustomerId || visibleCustomers[0]?.id;
+    return visibleCustomers.find(
+      (customer) => customer.id === effectiveCustomerId,
+    );
+  }, [
+    isCustomerScoped,
+    scopedCustomerId,
+    selectedCustomerId,
+    visibleCustomers,
+  ]);
   const effectivePrimaryMsisdn =
-    selectedCustomer?.primaryMsisdns.includes(selectedPrimaryMsisdn) && selectedPrimaryMsisdn
+    selectedCustomer?.primaryMsisdns.includes(selectedPrimaryMsisdn) &&
+    selectedPrimaryMsisdn
       ? selectedPrimaryMsisdn
       : (selectedCustomer?.primaryMsisdns[0] ?? "");
 
@@ -124,7 +182,12 @@ export function CustomerPortal() {
     return <Panel>Loading customer portal...</Panel>;
   }
 
-  if (customersQuery.isError || bundlesQuery.isError || !customersQuery.data || !bundlesQuery.data) {
+  if (
+    customersQuery.isError ||
+    bundlesQuery.isError ||
+    !customersQuery.data ||
+    !bundlesQuery.data
+  ) {
     return <Panel>Customer portal could not be loaded.</Panel>;
   }
 
@@ -143,23 +206,41 @@ export function CustomerPortal() {
               : "Purchase bundles, check balance, and manage secondary numbers."}
           </p>
         </div>
-        <div className={cn("grid gap-2", isCustomerScoped ? "sm:grid-cols-1" : "sm:grid-cols-2")}>
+        <div
+          className={cn(
+            "grid gap-2",
+            isCustomerScoped ? "sm:grid-cols-1" : "sm:grid-cols-2",
+          )}
+        >
           {!isCustomerScoped && (
             <SelectField
               label="Customer"
               value={selectedCustomer?.id ?? ""}
               onValueChange={(value) => {
-                const nextCustomer = visibleCustomers.find((customer) => customer.id === value);
-                setSelectedCustomerContext(value, nextCustomer?.primaryMsisdns[0] ?? "");
+                const nextCustomer = visibleCustomers.find(
+                  (customer) => customer.id === value,
+                );
+                setSelectedCustomerContext(
+                  value,
+                  nextCustomer?.primaryMsisdns[0] ?? "",
+                );
               }}
-              options={visibleCustomers.map((customer) => ({ label: customer.businessName, value: customer.id }))}
+              options={visibleCustomers.map((customer) => ({
+                label: customer.businessName,
+                value: customer.id,
+              }))}
             />
           )}
           <SelectField
             label="Primary MSISDN"
             value={effectivePrimaryMsisdn}
             onValueChange={setSelectedPrimaryMsisdn}
-            options={selectedCustomer?.primaryMsisdns.map((msisdn) => ({ label: msisdn, value: msisdn })) ?? []}
+            options={
+              selectedCustomer?.primaryMsisdns.map((msisdn) => ({
+                label: msisdn,
+                value: msisdn,
+              })) ?? []
+            }
           />
         </div>
       </div>
@@ -173,13 +254,19 @@ export function CustomerPortal() {
               setSelectedCustomerContext(selectedCustomer.id, primaryMsisdn);
             }}
           />
-          <CustomerBalance customer={selectedCustomer} primaryMsisdn={effectivePrimaryMsisdn} />
+          <CustomerBalance
+            customer={selectedCustomer}
+            primaryMsisdn={effectivePrimaryMsisdn}
+          />
           <PurchaseBundle
             customer={selectedCustomer}
             primaryMsisdn={effectivePrimaryMsisdn}
             bundles={bundlesQuery.data}
           />
-          <SecondaryNumbers customer={selectedCustomer} primaryMsisdn={effectivePrimaryMsisdn} />
+          <SecondaryNumbers
+            customer={selectedCustomer}
+            primaryMsisdn={effectivePrimaryMsisdn}
+          />
         </>
       )}
     </div>
@@ -200,20 +287,34 @@ function CustomerAccountsList({
   const [drawerPrimaryMsisdn, setDrawerPrimaryMsisdn] = useState("");
   const [msisdn, setMsisdn] = useState(UGANDA_PHONE_COUNTRY_CODE);
   const [bulkMsisdns, setBulkMsisdns] = useState("");
+  const [singleValidationError, setSingleValidationError] = useState("");
+  const [bulkValidationError, setBulkValidationError] = useState("");
 
   const invalidate = async (primaryMsisdn: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["secondary-numbers", customer.id, primaryMsisdn] }),
+      queryClient.invalidateQueries({
+        queryKey: ["secondary-numbers", customer.id, primaryMsisdn],
+      }),
       queryClient.invalidateQueries({ queryKey: ["customers"] }),
       queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
-      queryClient.invalidateQueries({ queryKey: ["customer-report", customer.id] }),
+      queryClient.invalidateQueries({
+        queryKey: ["customer-report", customer.id],
+      }),
       queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
     ]);
   };
 
   const addMutation = useMutation({
-    mutationFn: ({ primaryMsisdn }: { primaryMsisdn: string }) =>
-      api.addSecondaryNumber(customer.id, primaryMsisdn, { msisdn }),
+    mutationFn: ({
+      primaryMsisdn,
+      secondaryMsisdn,
+    }: {
+      primaryMsisdn: string;
+      secondaryMsisdn: string;
+    }) =>
+      api.addSecondaryNumber(customer.id, primaryMsisdn, {
+        msisdn: secondaryMsisdn,
+      }),
     onSuccess: async (_result, variables) => {
       setMsisdn(UGANDA_PHONE_COUNTRY_CODE);
       setDrawerPrimaryMsisdn("");
@@ -222,12 +323,15 @@ function CustomerAccountsList({
   });
 
   const bulkMutation = useMutation({
-    mutationFn: ({ primaryMsisdn }: { primaryMsisdn: string }) =>
+    mutationFn: ({
+      primaryMsisdn,
+      msisdns,
+    }: {
+      primaryMsisdn: string;
+      msisdns: string[];
+    }) =>
       api.addBulkSecondaryNumbers(customer.id, primaryMsisdn, {
-        msisdns: bulkMsisdns
-          .split(/[\s,]+/)
-          .map((item) => normalizeUgandaPhoneInput(item.trim()))
-          .filter((item) => item !== UGANDA_PHONE_COUNTRY_CODE),
+        msisdns,
       }),
     onSuccess: async (_result, variables) => {
       setBulkMsisdns("");
@@ -239,6 +343,8 @@ function CustomerAccountsList({
     onSelectPrimary(primaryMsisdn);
     addMutation.reset();
     bulkMutation.reset();
+    setSingleValidationError("");
+    setBulkValidationError("");
     setMsisdn(UGANDA_PHONE_COUNTRY_CODE);
     setBulkMsisdns("");
     setDrawerPrimaryMsisdn(primaryMsisdn);
@@ -251,7 +357,33 @@ function CustomerAccountsList({
 
     addMutation.reset();
     bulkMutation.reset();
+    setSingleValidationError("");
+    setBulkValidationError("");
     setDrawerPrimaryMsisdn("");
+  }
+
+  function submitSingleSecondary(primaryMsisdn: string) {
+    const normalizedMsisdn = normalizeUgandaPhoneInput(msisdn);
+
+    if (!isUgandaPhoneNumber(normalizedMsisdn)) {
+      setSingleValidationError("Enter a valid MTN Uganda secondary number.");
+      return;
+    }
+
+    setSingleValidationError("");
+    addMutation.mutate({ primaryMsisdn, secondaryMsisdn: normalizedMsisdn });
+  }
+
+  function submitBulkSecondary(primaryMsisdn: string) {
+    const msisdns = parseBulkMsisdns(bulkMsisdns);
+
+    if (msisdns.length === 0) {
+      setBulkValidationError("Paste at least one valid MTN Uganda number.");
+      return;
+    }
+
+    setBulkValidationError("");
+    bulkMutation.mutate({ primaryMsisdn, msisdns });
   }
 
   async function copyPrimaryMsisdn(primaryMsisdn: string) {
@@ -271,10 +403,14 @@ function CustomerAccountsList({
         <div>
           <h3 className="font-semibold">Customer Accounts</h3>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Select a primary account number, add secondary numbers, or check bundle balance.
+            Select a primary account number, add secondary numbers, or check
+            bundle balance.
           </p>
         </div>
-        <StatusBadge label={`${customer.primaryMsisdns.length} primary`} tone="yellow" />
+        <StatusBadge
+          label={`${customer.primaryMsisdns.length} primary`}
+          tone="yellow"
+        />
       </div>
 
       <div className="mt-4 grid max-h-80 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
@@ -288,7 +424,9 @@ function CustomerAccountsList({
                 key={primaryMsisdn}
                 className={cn(
                   "group flex min-h-14 min-w-0 items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-sm transition-colors focus-within:ring-2 focus-within:ring-ring/40",
-                  selected ? "border-primary/70 bg-primary/10" : "surface-table-hover",
+                  selected
+                    ? "border-primary/70 bg-primary/10"
+                    : "surface-table-hover",
                 )}
               >
                 <button
@@ -301,10 +439,14 @@ function CustomerAccountsList({
                   }}
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium">{primaryMsisdn}</span>
+                    <span className="truncate font-medium">
+                      {primaryMsisdn}
+                    </span>
                     {selected && <StatusBadge label="Selected" tone="green" />}
                   </span>
-                  <span className="mt-1 block text-xs text-[var(--muted)]">Primary {index + 1}</span>
+                  <span className="mt-1 block text-xs text-[var(--muted)]">
+                    Primary {index + 1}
+                  </span>
                 </button>
                 {copied ? (
                   <Check className="shrink-0 text-forest" />
@@ -334,24 +476,36 @@ function CustomerAccountsList({
         customerName={customer.businessName}
         primaryMsisdn={drawerPrimaryMsisdn}
         msisdn={msisdn}
-        onMsisdnChange={setMsisdn}
+        onMsisdnChange={(value) => {
+          setSingleValidationError("");
+          setMsisdn(value);
+        }}
         bulkMsisdns={bulkMsisdns}
-        onBulkMsisdnsChange={setBulkMsisdns}
+        onBulkMsisdnsChange={(value) => {
+          setBulkValidationError("");
+          setBulkMsisdns(value);
+        }}
         onClose={closeAddDrawer}
         onSingleSubmit={() => {
           if (drawerPrimaryMsisdn) {
-            addMutation.mutate({ primaryMsisdn: drawerPrimaryMsisdn });
+            submitSingleSecondary(drawerPrimaryMsisdn);
           }
         }}
         onBulkSubmit={() => {
           if (drawerPrimaryMsisdn) {
-            bulkMutation.mutate({ primaryMsisdn: drawerPrimaryMsisdn });
+            submitBulkSecondary(drawerPrimaryMsisdn);
           }
         }}
         singlePending={addMutation.isPending}
         bulkPending={bulkMutation.isPending}
-        singleErrorMessage={addMutation.isError ? addMutation.error.message : ""}
-        bulkErrorMessage={bulkMutation.isError ? bulkMutation.error.message : ""}
+        singleErrorMessage={
+          singleValidationError ||
+          (addMutation.isError ? addMutation.error.message : "")
+        }
+        bulkErrorMessage={
+          bulkValidationError ||
+          (bulkMutation.isError ? bulkMutation.error.message : "")
+        }
         bulkSuccessMessage={
           bulkMutation.isSuccess
             ? `Added ${bulkMutation.data.added.length}; rejected ${bulkMutation.data.rejected.length}.`
@@ -402,7 +556,13 @@ function CustomerPrimaryMsisdnActions({
   );
 }
 
-function CustomerBalance({ customer, primaryMsisdn }: { customer: Customer; primaryMsisdn: string }) {
+function CustomerBalance({
+  customer,
+  primaryMsisdn,
+}: {
+  customer: Customer;
+  primaryMsisdn: string;
+}) {
   const balanceQuery = useQuery({
     queryKey: ["balance", customer.id, primaryMsisdn],
     queryFn: () => api.balance(customer.id, primaryMsisdn),
@@ -419,9 +579,16 @@ function CustomerBalance({ customer, primaryMsisdn }: { customer: Customer; prim
   const balance = balanceQuery.data;
   const usagePercent =
     balance.totalVolumeGb > 0
-      ? Math.round(((balance.totalVolumeGb - balance.remainingVolumeGb) / balance.totalVolumeGb) * 100)
+      ? Math.round(
+          ((balance.totalVolumeGb - balance.remainingVolumeGb) /
+            balance.totalVolumeGb) *
+            100,
+        )
       : 0;
-  const usedVolumeGb = Math.max(balance.totalVolumeGb - balance.remainingVolumeGb, 0);
+  const usedVolumeGb = Math.max(
+    balance.totalVolumeGb - balance.remainingVolumeGb,
+    0,
+  );
   const dashboardCards = [
     {
       label: "Bundle",
@@ -464,19 +631,36 @@ function CustomerBalance({ customer, primaryMsisdn }: { customer: Customer; prim
         const Icon = card.icon;
 
         return (
-          <Panel key={card.label} className={cn("min-h-36 border shadow-sm", theme.card)}>
+          <Panel
+            key={card.label}
+            className={cn("min-h-36 border shadow-sm", theme.card)}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className={cn("text-sm font-medium", theme.label)}>{card.label}</p>
-                <p className={cn("mt-2 break-words font-semibold leading-tight", card.valueClassName)}>
+                <p className={cn("text-sm font-medium", theme.label)}>
+                  {card.label}
+                </p>
+                <p
+                  className={cn(
+                    "mt-2 break-words font-semibold leading-tight",
+                    card.valueClassName,
+                  )}
+                >
                   {card.value}
                 </p>
               </div>
-              <div className={cn("grid size-10 shrink-0 place-items-center rounded-md", theme.icon)}>
+              <div
+                className={cn(
+                  "grid size-10 shrink-0 place-items-center rounded-md",
+                  theme.icon,
+                )}
+              >
                 <Icon />
               </div>
             </div>
-            <p className={cn("mt-4 text-sm font-medium", theme.detail)}>{card.detail}</p>
+            <p className={cn("mt-4 text-sm font-medium", theme.detail)}>
+              {card.detail}
+            </p>
           </Panel>
         );
       })}
@@ -491,14 +675,20 @@ function PurchaseBundle({
 }: {
   customer: Customer;
   primaryMsisdn: string;
-  bundles: Array<{ id: string; name: string; priceUgx: number; serviceCode: string }>;
+  bundles: Array<{
+    id: string;
+    name: string;
+    priceUgx: number;
+    serviceCode: string;
+  }>;
 }) {
   const queryClient = useQueryClient();
   const [bundleId, setBundleId] = useState(bundles[0]?.id ?? "");
   const [provisioningCount, setProvisioningCount] = useState(1);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
-  const selectedBundle = bundles.find((bundle) => bundle.id === bundleId) ?? bundles[0];
+  const selectedBundle =
+    bundles.find((bundle) => bundle.id === bundleId) ?? bundles[0];
   const totalAmount = (selectedBundle?.priceUgx ?? 0) * provisioningCount;
 
   async function invalidateAfterPayment() {
@@ -507,11 +697,17 @@ function PurchaseBundle({
       queryClient.invalidateQueries({ queryKey: ["overview"] }),
       queryClient.invalidateQueries({ queryKey: ["customers"] }),
       queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
-      queryClient.invalidateQueries({ queryKey: ["balance", customer.id, primaryMsisdn] }),
+      queryClient.invalidateQueries({
+        queryKey: ["balance", customer.id, primaryMsisdn],
+      }),
       queryClient.invalidateQueries({ queryKey: ["admin-report"] }),
       queryClient.invalidateQueries({ queryKey: ["report-transactions"] }),
-      queryClient.invalidateQueries({ queryKey: ["report-transactions-infinite"] }),
-      queryClient.invalidateQueries({ queryKey: ["customer-report", customer.id] }),
+      queryClient.invalidateQueries({
+        queryKey: ["report-transactions-infinite"],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ["customer-report", customer.id],
+      }),
       queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
     ]);
   }
@@ -551,15 +747,20 @@ function PurchaseBundle({
           label="Bundle"
           value={selectedBundle?.id ?? ""}
           onValueChange={setBundleId}
-          options={bundles.map((bundle) => ({ label: `${bundle.name} - ${bundle.serviceCode}`, value: bundle.id }))}
+          options={bundles.map((bundle) => ({
+            label: `${bundle.name} - ${bundle.serviceCode}`,
+            value: bundle.id,
+          }))}
         />
         <TextField
           label="Count"
           min={1}
           max={12}
           type="number"
-          value={provisioningCount}
-          onValueChange={(value) => setProvisioningCount(Number(value))}
+          value={String(provisioningCount)}
+          onValueChange={(value) =>
+            setProvisioningCount(parseProvisioningCount(value))
+          }
         />
         <div className="flex items-end">
           <Button type="submit" variant="primary" disabled={!selectedBundle}>
@@ -584,11 +785,19 @@ function PurchaseBundle({
   );
 }
 
-function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; primaryMsisdn: string }) {
+function SecondaryNumbers({
+  customer,
+  primaryMsisdn,
+}: {
+  customer: Customer;
+  primaryMsisdn: string;
+}) {
   const queryClient = useQueryClient();
   const [addDrawerOpen, setAddDrawerOpen] = useState(false);
   const [msisdn, setMsisdn] = useState(UGANDA_PHONE_COUNTRY_CODE);
   const [bulkMsisdns, setBulkMsisdns] = useState("");
+  const [singleValidationError, setSingleValidationError] = useState("");
+  const [bulkValidationError, setBulkValidationError] = useState("");
   const [secondaryFilters, setSecondaryFilters] = useState<ListQuery>({
     page: 1,
     limit: 10,
@@ -598,24 +807,41 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
     dateTo: "",
   });
   const secondaryQuery = useQuery({
-    queryKey: ["secondary-numbers", customer.id, primaryMsisdn, secondaryFilters],
-    queryFn: () => api.secondaryNumbersPage(customer.id, primaryMsisdn, secondaryFilters),
+    queryKey: [
+      "secondary-numbers",
+      customer.id,
+      primaryMsisdn,
+      secondaryFilters,
+    ],
+    queryFn: () =>
+      api.secondaryNumbersPage(customer.id, primaryMsisdn, secondaryFilters),
     placeholderData: (previousData) => previousData,
   });
   function updateSecondaryFilters(nextFilters: Partial<ListQuery>) {
-    setSecondaryFilters((current) => ({ ...current, ...nextFilters, page: nextFilters.page ?? 1 }));
+    setSecondaryFilters((current) => ({
+      ...current,
+      ...nextFilters,
+      page: nextFilters.page ?? 1,
+    }));
   }
   const invalidate = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["secondary-numbers", customer.id, primaryMsisdn] }),
+      queryClient.invalidateQueries({
+        queryKey: ["secondary-numbers", customer.id, primaryMsisdn],
+      }),
       queryClient.invalidateQueries({ queryKey: ["customers"] }),
       queryClient.invalidateQueries({ queryKey: ["customers-table"] }),
-      queryClient.invalidateQueries({ queryKey: ["customer-report", customer.id] }),
+      queryClient.invalidateQueries({
+        queryKey: ["customer-report", customer.id],
+      }),
       queryClient.invalidateQueries({ queryKey: ["audit-events"] }),
     ]);
   };
   const addMutation = useMutation({
-    mutationFn: () => api.addSecondaryNumber(customer.id, primaryMsisdn, { msisdn }),
+    mutationFn: (secondaryMsisdn: string) =>
+      api.addSecondaryNumber(customer.id, primaryMsisdn, {
+        msisdn: secondaryMsisdn,
+      }),
     onSuccess: async () => {
       setMsisdn(UGANDA_PHONE_COUNTRY_CODE);
       setAddDrawerOpen(false);
@@ -623,12 +849,9 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
     },
   });
   const bulkMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (msisdns: string[]) =>
       api.addBulkSecondaryNumbers(customer.id, primaryMsisdn, {
-        msisdns: bulkMsisdns
-          .split(/[\s,]+/)
-          .map((item) => normalizeUgandaPhoneInput(item.trim()))
-          .filter((item) => item !== UGANDA_PHONE_COUNTRY_CODE),
+        msisdns,
       }),
     onSuccess: async () => {
       setBulkMsisdns("");
@@ -636,7 +859,8 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
     },
   });
   const removeMutation = useMutation({
-    mutationFn: (secondaryMsisdn: string) => api.removeSecondaryNumber(customer.id, primaryMsisdn, secondaryMsisdn),
+    mutationFn: (secondaryMsisdn: string) =>
+      api.removeSecondaryNumber(customer.id, primaryMsisdn, secondaryMsisdn),
     onSuccess: invalidate,
   });
   const secondaryColumns: Array<DataTableColumn<SecondaryNumber>> = [
@@ -644,7 +868,9 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
       id: "msisdn",
       header: "MSISDN",
       exportValue: (secondaryNumber) => secondaryNumber.msisdn,
-      cell: (secondaryNumber) => <span className="font-medium">{secondaryNumber.msisdn}</span>,
+      cell: (secondaryNumber) => (
+        <span className="font-medium">{secondaryNumber.msisdn}</span>
+      ),
     },
     {
       id: "apnId",
@@ -662,7 +888,12 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
       id: "status",
       header: "Status",
       exportValue: (secondaryNumber) => sentenceCase(secondaryNumber.status),
-      cell: (secondaryNumber) => <StatusBadge label={sentenceCase(secondaryNumber.status)} tone="green" />,
+      cell: (secondaryNumber) => (
+        <StatusBadge
+          label={sentenceCase(secondaryNumber.status)}
+          tone="green"
+        />
+      ),
     },
   ];
   const secondaryRowActions: Array<DataTableRowAction<SecondaryNumber>> = [
@@ -683,7 +914,10 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
       label: "Check balance",
       icon: Activity,
       onSelect: (secondaryNumber) => {
-        void showPrimaryBalance(secondaryNumber.customerId, secondaryNumber.primaryMsisdn);
+        void showPrimaryBalance(
+          secondaryNumber.customerId,
+          secondaryNumber.primaryMsisdn,
+        );
       },
     },
     {
@@ -692,12 +926,15 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
       icon: Trash2,
       variant: "destructive",
       disabled: removeMutation.isPending,
-      onSelect: (secondaryNumber) => removeMutation.mutate(secondaryNumber.msisdn),
+      onSelect: (secondaryNumber) =>
+        removeMutation.mutate(secondaryNumber.msisdn),
     },
   ];
   function openAddDrawer() {
     addMutation.reset();
     bulkMutation.reset();
+    setSingleValidationError("");
+    setBulkValidationError("");
     setMsisdn(UGANDA_PHONE_COUNTRY_CODE);
     setBulkMsisdns("");
     setAddDrawerOpen(true);
@@ -710,7 +947,33 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
 
     addMutation.reset();
     bulkMutation.reset();
+    setSingleValidationError("");
+    setBulkValidationError("");
     setAddDrawerOpen(false);
+  }
+
+  function submitSingleSecondary() {
+    const normalizedMsisdn = normalizeUgandaPhoneInput(msisdn);
+
+    if (!isUgandaPhoneNumber(normalizedMsisdn)) {
+      setSingleValidationError("Enter a valid MTN Uganda secondary number.");
+      return;
+    }
+
+    setSingleValidationError("");
+    addMutation.mutate(normalizedMsisdn);
+  }
+
+  function submitBulkSecondary() {
+    const msisdns = parseBulkMsisdns(bulkMsisdns);
+
+    if (msisdns.length === 0) {
+      setBulkValidationError("Paste at least one valid MTN Uganda number.");
+      return;
+    }
+
+    setBulkValidationError("");
+    bulkMutation.mutate(msisdns);
   }
 
   return (
@@ -723,11 +986,20 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="primary" size="sm" onClick={openAddDrawer}>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={openAddDrawer}
+          >
             <Plus className="h-4 w-4" />
             Add Secondary
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => secondaryQuery.refetch()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => secondaryQuery.refetch()}
+          >
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
@@ -767,7 +1039,9 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
                 label="From"
                 type="date"
                 value={secondaryFilters.dateFrom ?? ""}
-                onChange={(value) => updateSecondaryFilters({ dateFrom: value })}
+                onChange={(value) =>
+                  updateSecondaryFilters({ dateFrom: value })
+                }
               />
               <FilterInput
                 label="To"
@@ -804,16 +1078,28 @@ function SecondaryNumbers({ customer, primaryMsisdn }: { customer: Customer; pri
         customerName={customer.businessName}
         primaryMsisdn={primaryMsisdn}
         msisdn={msisdn}
-        onMsisdnChange={setMsisdn}
+        onMsisdnChange={(value) => {
+          setSingleValidationError("");
+          setMsisdn(value);
+        }}
         bulkMsisdns={bulkMsisdns}
-        onBulkMsisdnsChange={setBulkMsisdns}
+        onBulkMsisdnsChange={(value) => {
+          setBulkValidationError("");
+          setBulkMsisdns(value);
+        }}
         onClose={closeAddDrawer}
-        onSingleSubmit={() => addMutation.mutate()}
-        onBulkSubmit={() => bulkMutation.mutate()}
+        onSingleSubmit={submitSingleSecondary}
+        onBulkSubmit={submitBulkSecondary}
         singlePending={addMutation.isPending}
         bulkPending={bulkMutation.isPending}
-        singleErrorMessage={addMutation.isError ? addMutation.error.message : ""}
-        bulkErrorMessage={bulkMutation.isError ? bulkMutation.error.message : ""}
+        singleErrorMessage={
+          singleValidationError ||
+          (addMutation.isError ? addMutation.error.message : "")
+        }
+        bulkErrorMessage={
+          bulkValidationError ||
+          (bulkMutation.isError ? bulkMutation.error.message : "")
+        }
         bulkSuccessMessage={
           bulkMutation.isSuccess
             ? `Added ${bulkMutation.data.added.length}; rejected ${bulkMutation.data.rejected.length}.`
@@ -879,14 +1165,24 @@ function SecondaryNumberDrawer({
       >
         <header className="flex items-start justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-4 py-4">
           <div className="min-w-0">
-            <h2 id="secondary-number-drawer-title" className="text-lg font-semibold">
+            <h2
+              id="secondary-number-drawer-title"
+              className="text-lg font-semibold"
+            >
               Add Secondary Numbers
             </h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Add one number or upload many under {customerName} for {primaryMsisdn}.
+              Add one number or upload many under {customerName} for{" "}
+              {primaryMsisdn}.
             </p>
           </div>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close"
+            onClick={onClose}
+          >
             <X className="h-4 w-4" />
           </Button>
         </header>
@@ -914,15 +1210,24 @@ function SecondaryNumberDrawer({
                 disabled={singlePending || bulkPending}
               />
               <p className="mt-3 text-sm text-[var(--muted)]">
-                Only MTN Uganda numbers using +256 77, 78, 79, 76, or 39 are accepted.
+                Only MTN Uganda numbers using +256 77, 78, 79, 76, or 39 are
+                accepted.
               </p>
               <div className="mt-4 flex justify-end">
-                <Button type="submit" variant="primary" disabled={singlePending || bulkPending}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={singlePending || bulkPending}
+                >
                   <Plus className="h-4 w-4" />
                   {singlePending ? "Adding..." : "Add Number"}
                 </Button>
               </div>
-              {singleErrorMessage && <p className="mt-3 text-sm font-medium text-coral">{singleErrorMessage}</p>}
+              {singleErrorMessage && (
+                <p className="mt-3 text-sm font-medium text-coral">
+                  {singleErrorMessage}
+                </p>
+              )}
             </form>
 
             <form
@@ -946,18 +1251,35 @@ function SecondaryNumberDrawer({
                 disabled={singlePending || bulkPending}
               />
               <div className="mt-4 flex justify-end">
-                <Button type="submit" variant="primary" disabled={singlePending || bulkPending}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={singlePending || bulkPending}
+                >
                   <Upload className="h-4 w-4" />
                   {bulkPending ? "Processing..." : "Process Upload"}
                 </Button>
               </div>
-              {bulkSuccessMessage && <p className="mt-3 text-sm font-medium text-forest">{bulkSuccessMessage}</p>}
-              {bulkErrorMessage && <p className="mt-3 text-sm font-medium text-coral">{bulkErrorMessage}</p>}
+              {bulkSuccessMessage && (
+                <p className="mt-3 text-sm font-medium text-forest">
+                  {bulkSuccessMessage}
+                </p>
+              )}
+              {bulkErrorMessage && (
+                <p className="mt-3 text-sm font-medium text-coral">
+                  {bulkErrorMessage}
+                </p>
+              )}
             </form>
           </div>
 
           <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] bg-[var(--panel)] px-4 py-4">
-            <Button type="button" variant="outline" disabled={isPending} onClick={onClose}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isPending}
+              onClick={onClose}
+            >
               Close
             </Button>
           </footer>
@@ -979,7 +1301,12 @@ function FilterInput({
   type?: string;
 }) {
   return (
-    <TextField label={label} type={type} value={value} onValueChange={onChange} />
+    <TextField
+      label={label}
+      type={type}
+      value={value}
+      onValueChange={onChange}
+    />
   );
 }
 
@@ -995,6 +1322,11 @@ function FilterSelect({
   options: Array<{ label: string; value: string }>;
 }) {
   return (
-    <SelectField label={label} value={value} onValueChange={onChange} options={options} />
+    <SelectField
+      label={label}
+      value={value}
+      onValueChange={onChange}
+      options={options}
+    />
   );
 }

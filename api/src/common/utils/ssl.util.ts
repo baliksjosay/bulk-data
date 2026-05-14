@@ -2,7 +2,9 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 const configService = new ConfigService();
+const logger = new Logger('LocalhostSsl');
 
 export interface HttpsOptions {
   key?: Buffer;
@@ -14,9 +16,12 @@ export interface HttpsOptions {
  * If missing, generates them using OpenSSL and returns the key/cert buffers.
  */
 export async function ensureLocalhostSSL(): Promise<HttpsOptions> {
-  const sslPath = configService.get<string>('LOCALHOST_SSL_PATH', '../../../../ssl');
+  const sslPath = configService.get<string>(
+    'LOCALHOST_SSL_PATH',
+    '../../../../ssl',
+  );
   if (!sslPath) {
-    console.error('❌ LOCALHOST_SSL_PATH is not set in environment variables.');
+    logger.error('LOCALHOST_SSL_PATH is not set in environment variables.');
     process.exit(1);
   }
   const SSL_DIR = path.join(sslPath, '.localhost-ssl');
@@ -38,20 +43,20 @@ export async function ensureLocalhostSSL(): Promise<HttpsOptions> {
     }
 
     // Otherwise, generate self-signed certs
-    console.log('🔐 Generating self-signed localhost certificates...');
-     execSync(
+    logger.log('Generating self-signed localhost certificates.');
+    execSync(
       `openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "${KEY_PATH}" -out "${CERT_PATH}" -subj "/CN=localhost"`,
       { stdio: 'inherit' },
     );
 
-    console.log(`✅ Certificates generated at: ${SSL_DIR}`);
+    logger.log(`Certificates generated at: ${SSL_DIR}`);
     return {
       key: fs.readFileSync(KEY_PATH),
       cert: fs.readFileSync(CERT_PATH),
     };
   } catch (err) {
-    console.error('❌ Failed to set up HTTPS certificates:', err);
-    console.error('Please ensure OpenSSL is installed and available in PATH.');
+    logger.error('Failed to set up HTTPS certificates.', err);
+    logger.error('Please ensure OpenSSL is installed and available in PATH.');
     process.exit(1);
   }
 }

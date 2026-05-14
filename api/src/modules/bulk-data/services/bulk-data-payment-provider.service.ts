@@ -2,7 +2,13 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
+import {
+  durationSince,
+  integrationTargetHost,
+  logIntegrationEvent,
+} from 'src/common/logging/integration-logger';
 import { PaymentMethod, PaymentSessionStatus } from '../dto/bulk-data.dto';
 import {
   BulkBundleEntity,
@@ -34,8 +40,17 @@ import {
   getMomoProviderMode,
 } from './bulk-data-sptransfer-provider';
 
+type PaymentProviderLogOptions = {
+  provider: string;
+  operation: string;
+  requestId?: string;
+  referenceId?: string;
+};
+
 @Injectable()
 export class BulkDataPaymentProviderService {
+  private readonly logger = new Logger(BulkDataPaymentProviderService.name);
+
   constructor(
     private readonly paymentSessions: BulkPaymentSessionsRepository,
     private readonly prnProvider: BulkDataPrnProviderService,
@@ -144,6 +159,12 @@ export class BulkDataPaymentProviderService {
       },
       'Payment provider initiation failed',
       this.providerTimeoutMs('PAYMENT_PROVIDER_TIMEOUT_MS'),
+      {
+        provider: 'card',
+        operation: 'initiate_checkout',
+        requestId: session.id,
+        referenceId: transaction.id,
+      },
     );
     const providerUrl = this.extractProviderPaymentUrl(body);
 
@@ -234,6 +255,12 @@ export class BulkDataPaymentProviderService {
         'PAYMENT_MOMO_PROVIDER_TIMEOUT_MS',
         'PAYMENT_PROVIDER_TIMEOUT_MS',
       ),
+      {
+        provider: 'momo',
+        operation: 'initiate_payment',
+        requestId: session.id,
+        referenceId: transaction.id,
+      },
     );
   }
 
@@ -264,6 +291,12 @@ export class BulkDataPaymentProviderService {
         'PAYMENT_MOMO_PROVIDER_TIMEOUT_MS',
         'PAYMENT_PROVIDER_TIMEOUT_MS',
       ),
+      {
+        provider: 'sptransfer',
+        operation: 'initiate_payment',
+        requestId: session.id,
+        referenceId: request.providerTransactionId,
+      },
     );
     assertSpTransferAccepted(body);
 
@@ -295,6 +328,12 @@ export class BulkDataPaymentProviderService {
         'PAYMENT_AIRTIME_PROVIDER_TIMEOUT_MS',
         'PAYMENT_PROVIDER_TIMEOUT_MS',
       ),
+      {
+        provider: 'airtime',
+        operation: 'update_balance_and_date',
+        requestId: session.id,
+        referenceId: request.originTransactionID,
+      },
     );
     assertAirtimeUpdateBalanceAccepted(body);
   }
@@ -305,9 +344,22 @@ export class BulkDataPaymentProviderService {
     body: Record<string, unknown>,
     errorPrefix: string,
     timeoutMs: number,
+    logOptions: PaymentProviderLogOptions,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
+    const targetHost = integrationTargetHost(url);
+
+    logIntegrationEvent(this.logger, {
+      provider: logOptions.provider,
+      operation: logOptions.operation,
+      outcome: 'started',
+      requestId: logOptions.requestId,
+      referenceId: logOptions.referenceId,
+      targetHost,
+      context: { timeoutMs },
+    });
 
     try {
       const response = await fetch(url, {
@@ -319,6 +371,17 @@ export class BulkDataPaymentProviderService {
 
       if (!response.ok) {
         const providerMessage = await response.text().catch(() => '');
+        logIntegrationEvent(this.logger, {
+          provider: logOptions.provider,
+          operation: logOptions.operation,
+          outcome: 'failed',
+          requestId: logOptions.requestId,
+          referenceId: logOptions.referenceId,
+          targetHost,
+          statusCode: response.status,
+          durationMs: durationSince(startedAt),
+          errorMessage: 'Provider returned non-success status',
+        });
         throw new BadGatewayException(
           `${errorPrefix} (${response.status})${
             providerMessage ? `: ${providerMessage.slice(0, 180)}` : ''
@@ -326,14 +389,38 @@ export class BulkDataPaymentProviderService {
         );
       }
 
-      return (await response
+      const responseBody = (await response
         .json()
         .catch(() => ({}))) as PaymentProviderInitiationBody;
+
+      logIntegrationEvent(this.logger, {
+        provider: logOptions.provider,
+        operation: logOptions.operation,
+        outcome: 'succeeded',
+        requestId: logOptions.requestId,
+        referenceId: logOptions.referenceId,
+        targetHost,
+        statusCode: response.status,
+        durationMs: durationSince(startedAt),
+      });
+
+      return responseBody;
     } catch (error) {
       if (error instanceof BadGatewayException) {
         throw error;
       }
 
+      logIntegrationEvent(this.logger, {
+        provider: logOptions.provider,
+        operation: logOptions.operation,
+        outcome: 'failed',
+        requestId: logOptions.requestId,
+        referenceId: logOptions.referenceId,
+        targetHost,
+        durationMs: durationSince(startedAt),
+        errorCode: error instanceof Error ? error.name : undefined,
+        errorMessage: 'Provider request failed',
+      });
       throw new BadGatewayException(errorPrefix);
     } finally {
       clearTimeout(timeout);

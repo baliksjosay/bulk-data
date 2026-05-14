@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PhoneField, SelectField, TextField } from "@/components/ui/form-field";
 import { Panel } from "@/components/ui/panel";
 import { api } from "@/lib/api-client";
+import { isUgandaPhoneNumber } from "@/lib/uganda-phone";
 import type { StaffUserCreateRequest, UserAccount } from "@/types/domain";
 
 const emptyStaffForm: StaffUserCreateRequest = {
@@ -19,6 +20,7 @@ const emptyStaffForm: StaffUserCreateRequest = {
 export function StaffUserManagementPanel() {
   const [form, setForm] = useState<StaffUserCreateRequest>(emptyStaffForm);
   const [createdUser, setCreatedUser] = useState<UserAccount | null>(null);
+  const [formError, setFormError] = useState("");
 
   const createStaffMutation = useMutation({
     mutationFn: (payload: StaffUserCreateRequest) =>
@@ -34,17 +36,37 @@ export function StaffUserManagementPanel() {
     value: StaffUserCreateRequest[K],
   ) {
     setForm((current) => ({ ...current, [key]: value }));
+    setFormError("");
     createStaffMutation.reset();
   }
 
   function submitStaffUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreatedUser(null);
-    createStaffMutation.mutate({
+
+    const payload: StaffUserCreateRequest = {
       ...form,
+      phoneNumber: form.phoneNumber.trim(),
       email: form.email.trim().toLowerCase(),
       lanId: form.lanId.trim(),
-    });
+    };
+
+    if (!isUgandaPhoneNumber(payload.phoneNumber)) {
+      setFormError("Enter a valid MTN Uganda phone number.");
+      return;
+    }
+
+    if (!payload.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
+      setFormError("Enter a valid email address.");
+      return;
+    }
+
+    if (payload.lanId.length < 2) {
+      setFormError("Enter a valid login ID.");
+      return;
+    }
+
+    createStaffMutation.mutate(payload);
   }
 
   return (
@@ -109,11 +131,12 @@ export function StaffUserManagementPanel() {
       </form>
 
       <div aria-live="polite" className="min-h-5 text-sm">
-        {createStaffMutation.isError && (
+        {(formError || createStaffMutation.isError) && (
           <p className="text-destructive">
-            {createStaffMutation.error instanceof Error
-              ? createStaffMutation.error.message
-              : "User could not be created"}
+            {formError ||
+              (createStaffMutation.error instanceof Error
+                ? createStaffMutation.error.message
+                : "User could not be created")}
           </p>
         )}
         {createdUser && (

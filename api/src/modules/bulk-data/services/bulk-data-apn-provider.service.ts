@@ -2,18 +2,29 @@ import {
   BadGatewayException,
   GatewayTimeoutException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as https from 'node:https';
-import { normalizeProvisioningMsisdn } from 'src/modules/provisioning/utils/provisioning-msisdn.util';
+import {
+  durationSince,
+  integrationTargetHost,
+  logIntegrationEvent,
+} from 'src/common/logging/integration-logger';
+import {
+  maskProvisioningMsisdn,
+  normalizeProvisioningMsisdn,
+} from 'src/modules/provisioning/utils/provisioning-msisdn.util';
 import { MsisdnValidationResult } from './bulk-data.types';
 
 type ApnProviderBody = Record<string, unknown> | null;
 
 @Injectable()
 export class BulkDataApnProviderService {
+  private readonly logger = new Logger(BulkDataApnProviderService.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   async validateMsisdnForCustomer(
@@ -71,6 +82,20 @@ export class BulkDataApnProviderService {
       throw new ServiceUnavailableException('APN validation is not configured');
     }
 
+    const timeout =
+      this.configService.get<number>('apnProvider.timeoutMs') ?? 15000;
+    const startedAt = Date.now();
+    const targetHost = integrationTargetHost(url);
+
+    logIntegrationEvent(this.logger, {
+      provider: 'apn',
+      operation: 'retrieve_apn',
+      outcome: 'started',
+      referenceId: maskProvisioningMsisdn(msisdn),
+      targetHost,
+      context: { timeoutMs: timeout },
+    });
+
     try {
       const response = await axios.post<ApnProviderBody>(
         url,
@@ -78,26 +103,68 @@ export class BulkDataApnProviderService {
         {
           headers: this.buildHeaders(),
           httpsAgent: this.buildHttpsAgent(),
-          timeout:
-            this.configService.get<number>('apnProvider.timeoutMs') ?? 15000,
+          timeout,
         },
       );
-      return uniqueStrings(extractApnIds(response.data));
+      const apnIds = uniqueStrings(extractApnIds(response.data));
+
+      logIntegrationEvent(this.logger, {
+        provider: 'apn',
+        operation: 'retrieve_apn',
+        outcome: 'succeeded',
+        referenceId: maskProvisioningMsisdn(msisdn),
+        targetHost,
+        statusCode: response.status,
+        durationMs: durationSince(startedAt),
+        context: { apnCount: apnIds.length },
+      });
+
+      return apnIds;
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
+          logIntegrationEvent(this.logger, {
+            provider: 'apn',
+            operation: 'retrieve_apn',
+            outcome: 'failed',
+            referenceId: maskProvisioningMsisdn(msisdn),
+            targetHost,
+            durationMs: durationSince(startedAt),
+            errorCode: error.code,
+            errorMessage: 'Provider request timed out',
+          });
           throw new GatewayTimeoutException(
             'APN validation provider request timed out',
           );
         }
 
         if (error.response?.status) {
+          logIntegrationEvent(this.logger, {
+            provider: 'apn',
+            operation: 'retrieve_apn',
+            outcome: 'failed',
+            referenceId: maskProvisioningMsisdn(msisdn),
+            targetHost,
+            statusCode: error.response.status,
+            durationMs: durationSince(startedAt),
+            errorCode: error.code,
+            errorMessage: 'Provider returned non-success status',
+          });
           throw new BadGatewayException(
             'APN validation provider rejected the request',
           );
         }
       }
 
+      logIntegrationEvent(this.logger, {
+        provider: 'apn',
+        operation: 'retrieve_apn',
+        outcome: 'failed',
+        referenceId: maskProvisioningMsisdn(msisdn),
+        targetHost,
+        durationMs: durationSince(startedAt),
+        errorMessage: 'Provider unavailable',
+      });
       throw new ServiceUnavailableException(
         'APN validation provider is unavailable',
       );

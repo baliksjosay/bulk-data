@@ -1,5 +1,10 @@
-import { BadGatewayException, Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  durationSince,
+  integrationTargetHost,
+  logIntegrationEvent,
+} from 'src/common/logging/integration-logger';
 import {
   BulkBundleEntity,
   BulkPaymentSessionEntity,
@@ -17,6 +22,8 @@ import {
 
 @Injectable()
 export class BulkDataPrnProviderService {
+  private readonly logger = new Logger(BulkDataPrnProviderService.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   async generateReference(
@@ -64,6 +71,23 @@ export class BulkDataPrnProviderService {
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
+    const targetHost = integrationTargetHost(url);
+    const transactionId =
+      typeof body.transactionId === 'string'
+        ? body.transactionId
+        : typeof body.clientTransactionId === 'string'
+          ? body.clientTransactionId
+          : undefined;
+
+    logIntegrationEvent(this.logger, {
+      provider: 'prn',
+      operation: 'generate_reference',
+      outcome: 'started',
+      referenceId: transactionId,
+      targetHost,
+      context: { timeoutMs },
+    });
 
     try {
       const response = await fetch(url, {
@@ -75,6 +99,16 @@ export class BulkDataPrnProviderService {
 
       if (!response.ok) {
         const providerMessage = await response.text().catch(() => '');
+        logIntegrationEvent(this.logger, {
+          provider: 'prn',
+          operation: 'generate_reference',
+          outcome: 'failed',
+          referenceId: transactionId,
+          targetHost,
+          statusCode: response.status,
+          durationMs: durationSince(startedAt),
+          errorMessage: 'Provider returned non-success status',
+        });
         throw new BadGatewayException(
           `PRN provider initiation failed (${response.status})${
             providerMessage ? `: ${providerMessage.slice(0, 180)}` : ''
@@ -82,14 +116,36 @@ export class BulkDataPrnProviderService {
         );
       }
 
-      return (await response
+      const responseBody = (await response
         .json()
         .catch(() => ({}))) as PaymentProviderInitiationBody;
+
+      logIntegrationEvent(this.logger, {
+        provider: 'prn',
+        operation: 'generate_reference',
+        outcome: 'succeeded',
+        referenceId: transactionId,
+        targetHost,
+        statusCode: response.status,
+        durationMs: durationSince(startedAt),
+      });
+
+      return responseBody;
     } catch (error) {
       if (error instanceof BadGatewayException) {
         throw error;
       }
 
+      logIntegrationEvent(this.logger, {
+        provider: 'prn',
+        operation: 'generate_reference',
+        outcome: 'failed',
+        referenceId: transactionId,
+        targetHost,
+        durationMs: durationSince(startedAt),
+        errorCode: error instanceof Error ? error.name : undefined,
+        errorMessage: 'Provider request failed',
+      });
       throw new BadGatewayException('PRN provider initiation failed');
     } finally {
       clearTimeout(timeout);

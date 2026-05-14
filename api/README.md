@@ -61,6 +61,18 @@ On startup, the API creates or updates that account as an active local `ADMIN`.
 Admin/support users created later through `POST /users/staff` remain
 Active-Directory-backed by default.
 
+You can also run the bootstrap once without starting the HTTP server:
+
+```bash
+export INITIAL_ADMIN_EMAIL=baliksjosay@gmail.com
+export INITIAL_ADMIN_PASSWORD='<set locally>'
+npm run seed:admin
+```
+
+Add `--reset-password` only when the existing bootstrap admin password should be
+rotated. Use `--no-reset-password` to override a local reset flag for a one-off
+run. The command never logs the supplied password.
+
 ## Test
 
 ```bash

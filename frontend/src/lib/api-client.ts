@@ -1,5 +1,7 @@
 import type {
   ApiEnvelope,
+  ApiSuccessEnvelope,
+  ApiValidationIssue,
   AccountActivationOtpRequest,
   AccountActivationOtpResult,
   AccountActivationOtpVerificationRequest,
@@ -68,6 +70,22 @@ import type {
   WebAuthnRegistrationOptions,
 } from "@/types/domain";
 
+export class ApiClientError extends Error {
+  readonly status: number;
+  readonly errors: ApiValidationIssue[];
+
+  constructor(
+    message: string,
+    status: number,
+    errors: ApiValidationIssue[] = [],
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+    this.status = status;
+    this.errors = errors;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const envelope = await requestEnvelope<T>(path, init);
 
@@ -77,22 +95,79 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function requestEnvelope<T>(
   path: string,
   init?: RequestInit,
-): Promise<ApiEnvelope<T>> {
+): Promise<ApiSuccessEnvelope<T>> {
+  const bodyIsFormData = init?.body instanceof FormData;
+  const headers = new Headers(init?.headers);
+
+  if (!bodyIsFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(resolveApiPath(path), {
     ...init,
     credentials: init?.credentials ?? "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
-  const envelope = (await response.json()) as ApiEnvelope<T>;
+  const envelope = await readApiEnvelope<T>(response);
 
   if (!response.ok || !envelope.success) {
-    throw new Error(envelope.message || "Request failed");
+    throw new ApiClientError(
+      envelope.message || "Request failed",
+      response.status,
+      envelope.success ? [] : (envelope.errors ?? []),
+    );
   }
 
   return envelope;
+}
+
+async function readApiEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
+  const payload = await readJson(response);
+
+  if (isApiEnvelope<T>(payload)) {
+    return payload;
+  }
+
+  return {
+    success: false,
+    message: response.ok
+      ? "API response was not in the expected format"
+      : `Request failed with status ${response.status}`,
+    data: null,
+  };
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isApiEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
+  if (!isRecord(value) || typeof value.success !== "boolean") {
+    return false;
+  }
+
+  if (value.success) {
+    return typeof value.message === "string" && "data" in value;
+  }
+
+  return (
+    typeof value.message === "string" &&
+    (!("errors" in value) || Array.isArray(value.errors))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function requestPaginated<T>(

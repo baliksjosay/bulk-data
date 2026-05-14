@@ -12,6 +12,7 @@ import { UserPreferencesService } from './services/user-preferences.service';
 import { UserController } from './controllers/user.controller';
 import { UserSessionsController } from './controllers/user-session.controller';
 import { UserPreferencesController } from './controllers/user-preferences.controller';
+import { InitialAdminSeedService } from './services/initial-admin-seed.service';
 
 /**
  * Users Module
@@ -20,9 +21,14 @@ import { UserPreferencesController } from './controllers/user-preferences.contro
  */
 @Module({
   imports: [TypeOrmModule.forFeature([User, UserPreference, UserSession])],
-  controllers: [UserController, UserSessionsController, UserPreferencesController],
+  controllers: [
+    UserController,
+    UserSessionsController,
+    UserPreferencesController,
+  ],
   providers: [
     UserService,
+    InitialAdminSeedService,
     UserSessionsService,
     UserPreferencesService,
     UserRepository,
@@ -31,6 +37,7 @@ import { UserPreferencesController } from './controllers/user-preferences.contro
   ],
   exports: [
     UserService,
+    InitialAdminSeedService,
     UserSessionsService,
     UserPreferencesService,
     UserRepository,

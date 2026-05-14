@@ -7,7 +7,7 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && rm -rf .next/dev/types && tsc --noEmit",
     "lint": "eslint ."
   },
   "dependencies": {

@@ -17,6 +17,23 @@ import {
   HealthCheckFilterDto,
 } from './dto/health-response.dto';
 
+type PackageJson = {
+  name?: string;
+  version?: string;
+};
+
+type HealthStatus = 'UP' | 'DOWN';
+
+type ServiceHealth = {
+  status: HealthStatus;
+  responseTime?: number;
+  error?: string;
+};
+
+type ServiceHealthMap = Record<string, ServiceHealth>;
+
+type CpuTimesKey = keyof os.CpuInfo['times'];
+
 /**
  * Health Check Service
  * Provides comprehensive health monitoring for the Wendi Commission Validation application
@@ -25,7 +42,7 @@ import {
 export class HealthCheckService {
   private readonly logger = new Logger(HealthCheckService.name);
   private readonly applicationStartTime = new Date();
-  private readonly packageJson: any;
+  private readonly packageJson: PackageJson;
 
   constructor(
     private readonly dataSource: DataSource,
@@ -35,9 +52,13 @@ export class HealthCheckService {
     // Load package.json for version information
     try {
       const packagePath = path.join(process.cwd(), 'package.json');
-      this.packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+      this.packageJson = JSON.parse(
+        fs.readFileSync(packagePath, 'utf8'),
+      ) as PackageJson;
     } catch (error) {
-      this.logger.warn('Could not load package.json', error.message);
+      this.logger.warn(
+        `Could not load package.json: ${getErrorMessage(error)}`,
+      );
       this.packageJson = { name: 'Unknown', version: 'Unknown' };
     }
   }
@@ -48,7 +69,13 @@ export class HealthCheckService {
   /**
    * Get database health for both primary and source databases
    */
-  async getDatabaseHealth(): Promise<any> {
+  async getDatabaseHealth(): Promise<{
+    status: HealthStatus;
+    version?: string;
+    currentTime?: string;
+    uptime?: string;
+    error?: string;
+  }> {
     try {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -65,7 +92,7 @@ export class HealthCheckService {
         uptimeResult = await queryRunner.query(
           `SELECT date_trunc('second', current_timestamp - pg_postmaster_start_time()) AS uptime FROM pg_postmaster_start_time()`,
         );
-      } catch (err) {
+      } catch {
         // If uptime query fails (on MariaDB/MySQL or older PG), fallback
         uptimeResult = [{ uptime: 'N/A' }];
       }
@@ -74,14 +101,14 @@ export class HealthCheckService {
 
       return {
         status: 'UP',
-        version: versionResult[0].version,
-        currentTime: timeResult[0].now,
-        uptime: uptimeResult[0].uptime || 'N/A',
+        version: String(versionResult[0]?.version ?? 'Unknown'),
+        currentTime: String(timeResult[0]?.now ?? ''),
+        uptime: String(uptimeResult[0]?.uptime ?? 'N/A'),
       };
     } catch (error) {
       return {
         status: 'DOWN',
-        error: error.message,
+        error: getErrorMessage(error),
       };
     }
   }
@@ -121,15 +148,15 @@ export class HealthCheckService {
   /**
    * Check external services health (Redis, Elasticsearch, etc.)
    */
-  async getExternalServicesHealth(): Promise<Record<string, any>> {
-    const services = {};
+  async getExternalServicesHealth(): Promise<ServiceHealthMap> {
+    const services: ServiceHealthMap = {};
 
     // Add Redis health check if configured
     if (this.configService.get('redis.enabled')) {
       try {
         services['redis'] = await this.checkRedisHealth();
       } catch (error) {
-        services['redis'] = { status: 'DOWN', error: error.message };
+        services['redis'] = { status: 'DOWN', error: getErrorMessage(error) };
       }
     }
 
@@ -143,8 +170,8 @@ export class HealthCheckService {
   /**
    * Check application-specific services health
    */
-  async getApplicationServicesHealth(): Promise<Record<string, any>> {
-    const services = {};
+  async getApplicationServicesHealth(): Promise<ServiceHealthMap> {
+    const services: ServiceHealthMap = {};
 
     try {
       // Check cache service
@@ -205,7 +232,7 @@ export class HealthCheckService {
       this.logger.error(`${name} database health check failed`, error);
       return {
         status: 'DOWN',
-        error: error.message,
+        error: getErrorMessage(error),
         responseTime: Date.now() - startTime,
       };
     }
@@ -278,7 +305,7 @@ export class HealthCheckService {
     let totalTick = 0;
 
     cpus.forEach((cpu) => {
-      for (const type in cpu.times) {
+      for (const type of Object.keys(cpu.times) as CpuTimesKey[]) {
         totalTick += cpu.times[type];
       }
       totalIdle += cpu.times.idle;
@@ -292,12 +319,15 @@ export class HealthCheckService {
   }
 
   async getDetailedHealth(): Promise<DetailedHealthResponseDto> {
+    const startedAt = Date.now();
     const database = await this.checkDatabaseHealth();
-    const system = this.getSystemInfo();
+    const system = await this.getSystemInfo();
 
-    const detailedHealth: any = {
+    const detailedHealth: DetailedHealthResponseDto = {
       status: 'UP',
       timestamp: new Date().toISOString(),
+      application: this.getApplicationInfo(),
+      responseTime: Date.now() - startedAt,
       database,
       system,
       externalServices: {
@@ -347,7 +377,7 @@ export class HealthCheckService {
     } catch (error) {
       return {
         status: 'DOWN',
-        error: error.message,
+        error: getErrorMessage(error),
       };
     }
   }
@@ -360,18 +390,25 @@ export class HealthCheckService {
     return `${d} days ${h}h ${m}m ${s}s`;
   }
 
-  private getDriverVersion(driver: any): string {
+  private getDriverVersion(driver: {
+    version?: unknown;
+    VERSION?: unknown;
+  }): string {
     // Try to extract driver version information
     try {
-      return driver.version || driver.VERSION || 'unknown';
+      return String(driver.version || driver.VERSION || 'unknown');
     } catch {
       return 'unknown';
     }
   }
 
-  private async checkRedisHealth(): Promise<any> {
+  private async checkRedisHealth(): Promise<ServiceHealth> {
     // Implementation for Redis health check
     // This would integrate with your Redis client
     return { status: 'UP', responseTime: 15 };
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
 }

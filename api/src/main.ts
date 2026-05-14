@@ -6,12 +6,14 @@ import {
 } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import { ClassSerializerInterceptor, Logger, ValidationPipe } from '@nestjs/common';
+import {
+  ClassSerializerInterceptor,
+  Logger,
+  ValidationPipe,
+} from '@nestjs/common';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import helmet from '@fastify/helmet';
-import fastifyStatic from '@fastify/static';
-import { join } from 'node:path';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
 import { setupSwagger } from './config/swagger.config';
@@ -89,7 +91,10 @@ async function bootstrap() {
     app.useWebSocketAdapter(new IoAdapter(app));
     // Swagger
     // ── Swagger (non-production only, or enable via env flag) ────────────
-    if (process.env.NODE_ENV !== 'production' || config.get<boolean>('SWAGGER_ENABLED')) {
+    if (
+      process.env.NODE_ENV !== 'production' ||
+      config.get<boolean>('SWAGGER_ENABLED')
+    ) {
       setupSwagger(app);
       Logger.log(`Swagger UI: ${process.env.BACKEND_URL}/api/docs`);
     }
@@ -103,11 +108,13 @@ async function bootstrap() {
     // App listen
     const port = config.get<number>('PORT', 8086);
     await app.listen(port, '0.0.0.0');
-    Logger.log(`🚀 Application running on ${await app.getUrl()}`, 'Bootstrap');
+    Logger.log(`Application running on ${await app.getUrl()}`, 'Bootstrap');
   } catch (error) {
-    Logger.error('❌ Error starting application', error.stack, 'Bootstrap');
-    console.log(error);
-
+    Logger.error(
+      'Error starting application',
+      error instanceof Error ? error.stack : undefined,
+      'Bootstrap',
+    );
     process.exit(1);
   }
 }
