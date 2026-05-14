@@ -68,6 +68,7 @@ import type {
   WebAuthnAuthenticationOptions,
   WebAuthnDevice,
   WebAuthnRegistrationOptions,
+  WebAuthnRegistrationResult,
 } from "@/types/domain";
 
 export class ApiClientError extends Error {
@@ -541,6 +542,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  finishWebAuthnRegistration: (payload: {
+    attestation: Record<string, unknown>;
+  }) =>
+    request<WebAuthnRegistrationResult>(
+      "/api/auth/webauthn/registration/verify",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
   webAuthnAuthenticationOptions: (payload: { email?: string }) =>
     request<WebAuthnAuthenticationOptions>(
       "/api/auth/webauthn/authentication/options",

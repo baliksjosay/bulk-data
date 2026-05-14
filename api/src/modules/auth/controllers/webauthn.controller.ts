@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Req,
 } from '@nestjs/common';
@@ -81,6 +84,42 @@ export class WebauthnController {
     return this.webauthnRegistrationService.finishRegistration(
       userId,
       dto.attestation,
+    );
+  }
+
+  @Get('credentials')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'List WebAuthn credentials',
+    description:
+      'Lists passkeys and security keys registered to the authenticated user.',
+  })
+  @ApiOkResponse({
+    description: 'WebAuthn credentials fetched successfully.',
+  })
+  async listCredentials(@CurrentUser('id') userId: string) {
+    return this.webauthnRegistrationService.listCredentials(userId);
+  }
+
+  @Delete('credentials/:credentialId')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Revoke WebAuthn credential',
+    description:
+      'Revokes a passkey or security key registered to the authenticated user.',
+  })
+  @ApiOkResponse({
+    description: 'WebAuthn credential revoked successfully.',
+  })
+  async revokeCredential(
+    @CurrentUser('id') userId: string,
+    @Param('credentialId') credentialId: string,
+  ) {
+    return this.webauthnRegistrationService.revokeCredential(
+      userId,
+      credentialId,
     );
   }
 

@@ -6,7 +6,7 @@ import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
-import { isoUint8Array } from '@simplewebauthn/server/helpers'; 
+import { isoUint8Array } from '@simplewebauthn/server/helpers';
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   RegistrationResponseJSON,
@@ -14,6 +14,8 @@ import type {
 } from '@simplewebauthn/types';
 
 import { WebauthnCredential } from '../../entities/webauthn-credential.entity';
+import { UserAuthFactor } from '../../entities/user-auth-factor.entity';
+import { AuthFactorType } from '../../enums/auth-factor-type.enum';
 import { UserService } from 'src/modules/users/services/user.service';
 import { RedisService } from 'src/modules/redis/redis.service';
 
@@ -27,6 +29,8 @@ export class WebauthnRegistrationService {
   constructor(
     @InjectRepository(WebauthnCredential)
     private readonly webauthnCredentialRepo: Repository<WebauthnCredential>,
+    @InjectRepository(UserAuthFactor)
+    private readonly factorRepo: Repository<UserAuthFactor>,
     private readonly usersService: UserService,
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
@@ -58,9 +62,12 @@ export class WebauthnRegistrationService {
     }));
 
     const options = await generateRegistrationOptions({
-      rpName: this.configService.get<string>('webauthn.rpName', 'Bulk Data Wholesale'),
+      rpName: this.configService.get<string>(
+        'webauthn.rpName',
+        'Bulk Data Wholesale',
+      ),
       rpID: this.configService.get<string>('webauthn.rpId', 'localhost'),
-      userID:isoUint8Array.fromUTF8String(user.id),
+      userID: isoUint8Array.fromUTF8String(user.id),
       userName: user.email,
       userDisplayName:
         `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || user.email,
@@ -93,9 +100,15 @@ export class WebauthnRegistrationService {
     attestation: Record<string, unknown>,
   ): Promise<{
     success: boolean;
+    id?: string;
+    label?: string;
     credentialId?: string;
+    transports?: AuthenticatorTransportFuture[];
     deviceType?: string;
     backedUp?: boolean;
+    createdAt?: string;
+    lastUsedAt?: string;
+    status?: 'active' | 'revoked';
   }> {
     const user = await this.usersService.requireById(userId);
 
@@ -120,7 +133,10 @@ export class WebauthnRegistrationService {
         response: parsed,
         expectedChallenge: storedChallenge.challenge,
         expectedOrigin: this.getExpectedOrigins(),
-        expectedRPID: this.configService.get<string>('webauthn.rpId', 'localhost'),
+        expectedRPID: this.configService.get<string>(
+          'webauthn.rpId',
+          'localhost',
+        ),
       });
     } catch (error) {
       throw new BadRequestException(
@@ -163,14 +179,112 @@ export class WebauthnRegistrationService {
     });
 
     await this.webauthnCredentialRepo.save(entity);
+    await this.enableWebauthnFactor(user.id, entity);
     await this.redisService.del(this.getRegistrationChallengeKey(userId));
 
     return {
       success: true,
-      credentialId: entity.credentialId,
-      deviceType: entity.deviceType ?? undefined,
-      backedUp: entity.backedUp,
+      ...this.serializeCredential(entity),
     };
+  }
+
+  async listCredentials(userId: string): Promise<
+    Array<{
+      id: string;
+      label: string;
+      credentialId: string;
+      transports: AuthenticatorTransportFuture[];
+      createdAt: string;
+      lastUsedAt: string;
+      status: 'active' | 'revoked';
+    }>
+  > {
+    const credentials = await this.webauthnCredentialRepo.find({
+      where: { userId },
+      order: {
+        isEnabled: 'DESC',
+        createdAt: 'DESC',
+      },
+    });
+
+    return credentials.map((credential) =>
+      this.serializeCredential(credential),
+    );
+  }
+
+  async revokeCredential(userId: string, credentialIdOrId: string) {
+    const credential = await this.webauthnCredentialRepo.findOne({
+      where: [
+        { id: credentialIdOrId, userId },
+        { credentialId: credentialIdOrId, userId },
+      ],
+    });
+
+    if (!credential) {
+      throw new BadRequestException('WebAuthn credential was not found');
+    }
+
+    credential.isEnabled = false;
+    const saved = await this.webauthnCredentialRepo.save(credential);
+
+    const remainingEnabledCredentials = await this.webauthnCredentialRepo.count(
+      {
+        where: {
+          userId,
+          isEnabled: true,
+        },
+      },
+    );
+
+    if (remainingEnabledCredentials === 0) {
+      const factor = await this.factorRepo.findOne({
+        where: {
+          userId,
+          type: AuthFactorType.WEBAUTHN,
+        },
+      });
+
+      if (factor) {
+        factor.isEnabled = false;
+        await this.factorRepo.save(factor);
+      }
+    }
+
+    return this.serializeCredential(saved);
+  }
+
+  private async enableWebauthnFactor(
+    userId: string,
+    credential: WebauthnCredential,
+  ): Promise<void> {
+    let factor = await this.factorRepo.findOne({
+      where: {
+        userId,
+        type: AuthFactorType.WEBAUTHN,
+      },
+    });
+
+    if (!factor) {
+      factor = this.factorRepo.create({
+        userId,
+        type: AuthFactorType.WEBAUTHN,
+        label: 'Passkey',
+        isEnabled: true,
+        isVerified: true,
+        isPrimary: false,
+      });
+    }
+
+    factor.isEnabled = true;
+    factor.isVerified = true;
+    factor.publicMetadata = {
+      ...(factor.publicMetadata ?? {}),
+      lastCredentialId: credential.credentialId,
+      deviceType: credential.deviceType,
+      backedUp: credential.backedUp,
+    };
+
+    await this.factorRepo.save(factor);
   }
 
   private getRegistrationChallengeKey(userId: string): string {
@@ -187,7 +301,10 @@ export class WebauthnRegistrationService {
     }
 
     return [
-      this.configService.get<string>('webauthn.origin', 'http://localhost:3000'),
+      this.configService.get<string>(
+        'webauthn.origin',
+        'http://localhost:3000',
+      ),
     ];
   }
 
@@ -205,6 +322,30 @@ export class WebauthnRegistrationService {
   private stringifyTransports(transports?: string[]): string | null {
     if (!transports?.length) return null;
     return transports.join(',');
+  }
+
+  private serializeCredential(credential: WebauthnCredential): {
+    id: string;
+    label: string;
+    credentialId: string;
+    transports: AuthenticatorTransportFuture[];
+    deviceType?: string;
+    backedUp: boolean;
+    createdAt: string;
+    lastUsedAt: string;
+    status: 'active' | 'revoked';
+  } {
+    return {
+      id: credential.id,
+      label: credential.label ?? 'Passkey',
+      credentialId: credential.credentialId,
+      transports: this.parseTransports(credential.transports) ?? [],
+      deviceType: credential.deviceType ?? undefined,
+      backedUp: credential.backedUp,
+      createdAt: credential.createdAt.toISOString(),
+      lastUsedAt: credential.updatedAt.toISOString(),
+      status: credential.isEnabled ? 'active' : 'revoked',
+    };
   }
 
   private uint8ArrayToBase64Url(value: Uint8Array): string {

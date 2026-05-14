@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { UserAuthFactor } from '../../entities/user-auth-factor.entity';
+import { WebauthnCredential } from '../../entities/webauthn-credential.entity';
 import { AuthFactorType } from '../../enums/auth-factor-type.enum';
 import { MfaMethod } from '../../enums/mfa-method.enum';
 
@@ -14,6 +15,8 @@ export class MfaFactorSelectorService {
   constructor(
     @InjectRepository(UserAuthFactor)
     private readonly factorRepo: Repository<UserAuthFactor>,
+    @InjectRepository(WebauthnCredential)
+    private readonly webauthnCredentialRepo: Repository<WebauthnCredential>,
   ) {}
 
   /**
@@ -33,7 +36,9 @@ export class MfaFactorSelectorService {
     });
 
     if (!factors.length) {
-      return MfaMethod.EMAIL_OTP;
+      return (await this.hasEnabledWebauthnCredential(userId))
+        ? MfaMethod.WEBAUTHN
+        : MfaMethod.EMAIL_OTP;
     }
 
     const factor = factors[0];
@@ -56,11 +61,17 @@ export class MfaFactorSelectorService {
       },
     });
 
-    return [
+    const methods = [
       ...new Set(
         factors.map((factor) => this.mapFactorTypeToMethod(factor.type)),
       ),
     ];
+
+    if (await this.hasEnabledWebauthnCredential(userId)) {
+      methods.push(MfaMethod.WEBAUTHN);
+    }
+
+    return [...new Set(methods)];
   }
 
   /**
@@ -75,8 +86,28 @@ export class MfaFactorSelectorService {
       },
     });
 
-    return factors.some(
+    const factorEnabled = factors.some(
       (factor) => this.mapFactorTypeToMethod(factor.type) === method,
+    );
+
+    if (factorEnabled) {
+      return true;
+    }
+
+    return (
+      method === MfaMethod.WEBAUTHN &&
+      (await this.hasEnabledWebauthnCredential(userId))
+    );
+  }
+
+  private async hasEnabledWebauthnCredential(userId: string): Promise<boolean> {
+    return (
+      (await this.webauthnCredentialRepo.count({
+        where: {
+          userId,
+          isEnabled: true,
+        },
+      })) > 0
     );
   }
 

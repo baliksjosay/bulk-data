@@ -229,13 +229,11 @@ export class AuthService {
 
     await this.authPolicyService.recordSuccessfulLoginContext(user.id, context);
 
-    return {
-      ...authResult,
-      mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
-    };
+    return this.createSuccessfulLoginResponse(
+      authResult,
+      user,
+      AuthEntryMethod.PASSWORD,
+    );
   }
 
   async loginWithOtp(
@@ -345,13 +343,11 @@ export class AuthService {
 
     await this.authPolicyService.recordSuccessfulLoginContext(user.id, context);
 
-    return {
-      ...authResult,
-      mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
-    };
+    return this.createSuccessfulLoginResponse(
+      authResult,
+      user,
+      AuthEntryMethod.OTP,
+    );
   }
 
   async loginWithGoogleOrMicrosoft(
@@ -509,13 +505,7 @@ export class AuthService {
 
     await this.authPolicyService.recordSuccessfulLoginContext(user.id, context);
 
-    return {
-      ...authResult,
-      mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
-    };
+    return this.createSuccessfulLoginResponse(authResult, user, entryMethod);
   }
 
   async loginWithWebauthn(input: {
@@ -597,13 +587,11 @@ export class AuthService {
       input.context,
     );
 
-    return {
-      ...authResult,
-      mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
-    };
+    return this.createSuccessfulLoginResponse(
+      authResult,
+      user,
+      AuthEntryMethod.WEBAUTHN,
+    );
   }
 
   async startMfaLoginChallenge(
@@ -891,13 +879,7 @@ export class AuthService {
 
     await this.authPolicyService.recordSuccessfulLoginContext(user.id, context);
 
-    return {
-      ...authResult,
-      mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
-    };
+    return this.createSuccessfulLoginResponse(authResult, user, entryMethod);
   }
 
   async refresh(
@@ -1193,6 +1175,56 @@ export class AuthService {
     return methods.includes(MfaMethod.EMAIL_OTP)
       ? MfaMethod.EMAIL_OTP
       : methods[0];
+  }
+
+  private async createSuccessfulLoginResponse(
+    authResult: {
+      accessToken: string;
+      refreshToken: string;
+      sessionId: string;
+    },
+    user: User,
+    entryMethod: AuthEntryMethod,
+  ): Promise<AuthResponseDto> {
+    const promptPasswordlessSetup = await this.shouldPromptPasswordlessSetup(
+      user,
+      entryMethod,
+    );
+
+    return {
+      ...authResult,
+      mfaRequired: false,
+      user: plainToInstance(UserResponseDto, user, {
+        excludeExtraneousValues: true,
+      }),
+      promptPasswordlessSetup,
+      passwordlessSetupPrompt: promptPasswordlessSetup
+        ? {
+            title: 'Set up faster sign-in',
+            message:
+              'Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock.',
+            setupUrl: '/console?section=security',
+          }
+        : undefined,
+    };
+  }
+
+  private async shouldPromptPasswordlessSetup(
+    user: User,
+    entryMethod: AuthEntryMethod,
+  ): Promise<boolean> {
+    if (
+      entryMethod === AuthEntryMethod.WEBAUTHN ||
+      entryMethod === AuthEntryMethod.PASSKEY ||
+      entryMethod === AuthEntryMethod.SECURITY_KEY
+    ) {
+      return false;
+    }
+
+    return !(await this.mfaFactorSelectorService.isMethodEnabled(
+      user.id,
+      MfaMethod.WEBAUTHN,
+    ));
   }
 
   /**

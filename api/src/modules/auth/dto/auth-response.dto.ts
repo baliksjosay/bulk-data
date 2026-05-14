@@ -88,6 +88,29 @@ export class AuthResponseDto {
   })
   mfaChallengeMetadata?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    description:
+      'Indicates whether the client should prompt the user to set up a passkey after successful login.',
+    example: true,
+  })
+  promptPasswordlessSetup?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'User-facing passkey setup prompt shown after successful non-WebAuthn login.',
+    example: {
+      title: 'Set up faster sign-in',
+      message:
+        'Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock.',
+      setupUrl: '/console?section=security',
+    },
+  })
+  passwordlessSetupPrompt?: {
+    title: string;
+    message: string;
+    setupUrl: string;
+  };
+
   @ApiProperty({
     description: 'Authenticated user payload.',
     type: () => UserResponseDto,

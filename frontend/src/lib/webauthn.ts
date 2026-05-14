@@ -4,7 +4,10 @@ import type {
   AuthMfaChallenge,
   WebAuthnAuthenticationOptions,
   WebAuthnDevice,
+  WebAuthnRegistrationResult,
 } from "@/types/domain";
+
+const liveApiEnabled = process.env.NEXT_PUBLIC_API_MODE === "live";
 
 function base64UrlToArrayBuffer(value: string) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -44,6 +47,10 @@ export async function registerPasskey(label: string): Promise<WebAuthnDevice> {
   const options = await api.webAuthnOptions();
 
   if (!window.PublicKeyCredential || !navigator.credentials) {
+    if (liveApiEnabled) {
+      throw new Error("Passkey registration is not available in this browser");
+    }
+
     return api.registerWebAuthnDevice({
       label,
       credentialId: `simulated-${createSimulatedCredentialId()}`,
@@ -71,6 +78,14 @@ export async function registerPasskey(label: string): Promise<WebAuthnDevice> {
     throw new Error("Passkey registration was cancelled");
   }
 
+  if (liveApiEnabled) {
+    const result = await api.finishWebAuthnRegistration({
+      attestation: serializeAttestationCredential(credential),
+    });
+
+    return webAuthnRegistrationResultToDevice(result, label);
+  }
+
   const attestationResponse =
     credential.response as AuthenticatorAttestationResponse;
   const transports: AuthenticatorTransport[] =
@@ -83,6 +98,27 @@ export async function registerPasskey(label: string): Promise<WebAuthnDevice> {
     credentialId: arrayBufferToBase64Url(credential.rawId),
     transports,
   });
+}
+
+function webAuthnRegistrationResultToDevice(
+  result: WebAuthnRegistrationResult,
+  fallbackLabel: string,
+): WebAuthnDevice {
+  if (!result.credentialId) {
+    throw new Error("Passkey registration did not return a credential");
+  }
+
+  const now = new Date().toISOString();
+
+  return {
+    id: result.id ?? result.credentialId,
+    label: result.label ?? fallbackLabel,
+    credentialId: result.credentialId,
+    transports: result.transports ?? ["internal"],
+    createdAt: result.createdAt ?? now,
+    lastUsedAt: result.lastUsedAt ?? result.createdAt ?? now,
+    status: result.status ?? "active",
+  };
 }
 
 export async function authenticatePasskey(
@@ -194,6 +230,26 @@ function serializePublicKeyCredential(credential: PublicKeyCredential) {
       userHandle: response.userHandle
         ? arrayBufferToBase64Url(response.userHandle)
         : null,
+    },
+    type: credential.type,
+    clientExtensionResults: credential.getClientExtensionResults(),
+  };
+}
+
+function serializeAttestationCredential(credential: PublicKeyCredential) {
+  const response = credential.response as AuthenticatorAttestationResponse;
+  const transports: AuthenticatorTransport[] =
+    typeof response.getTransports === "function"
+      ? (response.getTransports() as AuthenticatorTransport[])
+      : ["internal"];
+
+  return {
+    id: credential.id,
+    rawId: arrayBufferToBase64Url(credential.rawId),
+    response: {
+      attestationObject: arrayBufferToBase64Url(response.attestationObject),
+      clientDataJSON: arrayBufferToBase64Url(response.clientDataJSON),
+      transports,
     },
     type: credential.type,
     clientExtensionResults: credential.getClientExtensionResults(),

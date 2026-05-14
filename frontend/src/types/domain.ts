@@ -753,6 +753,19 @@ export interface WebAuthnRegistrationOptions {
   attestation: AttestationConveyancePreference;
 }
 
+export interface WebAuthnRegistrationResult {
+  success: boolean;
+  id?: string;
+  label?: string;
+  credentialId?: string;
+  transports?: AuthenticatorTransport[];
+  deviceType?: string;
+  backedUp?: boolean;
+  createdAt?: string;
+  lastUsedAt?: string;
+  status?: "active" | "revoked";
+}
+
 export interface WebAuthnAuthenticationOptions {
   challenge: string;
   timeout?: number;

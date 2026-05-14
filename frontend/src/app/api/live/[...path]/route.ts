@@ -83,6 +83,14 @@ function rewriteLivePath(path: string[]) {
     return ["auth", "webauthn", "registration", "options"];
   }
 
+  if (joinedPath === "security/webauthn/devices") {
+    return ["auth", "webauthn", "credentials"];
+  }
+
+  if (joinedPath.startsWith("security/webauthn/devices/")) {
+    return ["auth", "webauthn", "credentials", ...path.slice(3)];
+  }
+
   if (joinedPath === "security/totp/enrollment") {
     return ["auth", "mfa", "totp", "setup"];
   }
@@ -258,7 +266,10 @@ function mapLiveUser(user: JsonRecord, fallbackId: string) {
   };
 }
 
-function mapLiveAuthResult(payload: unknown): AuthLoginResponse | null {
+function mapLiveAuthResult(
+  payload: unknown,
+  options: { promptPasswordlessSetupFallback: boolean },
+): AuthLoginResponse | null {
   const data = unwrapPayload(payload);
 
   if (!isRecord(data) || !isRecord(data.user)) {
@@ -312,6 +323,29 @@ function mapLiveAuthResult(payload: unknown): AuthLoginResponse | null {
       ? data.sessionId
       : `live-${user.id ?? "session"}`;
   const mappedUser = mapLiveUser(user, sessionId);
+  const promptPasswordlessSetup =
+    typeof data.promptPasswordlessSetup === "boolean"
+      ? data.promptPasswordlessSetup
+      : options.promptPasswordlessSetupFallback;
+  const promptData = isRecord(data.passwordlessSetupPrompt)
+    ? data.passwordlessSetupPrompt
+    : {};
+  const passwordlessSetupPrompt = promptPasswordlessSetup
+    ? {
+        title:
+          typeof promptData.title === "string"
+            ? promptData.title
+            : "Set up faster sign-in",
+        message:
+          typeof promptData.message === "string"
+            ? promptData.message
+            : "Add a passkey so your next sign-in can use your device PIN, fingerprint, or face unlock.",
+        setupUrl:
+          typeof promptData.setupUrl === "string"
+            ? promptData.setupUrl
+            : "/console?section=security",
+      }
+    : undefined;
 
   return {
     user: mappedUser,
@@ -325,14 +359,13 @@ function mapLiveAuthResult(payload: unknown): AuthLoginResponse | null {
       mappedUser.role === "customer"
         ? "/console?section=customer"
         : "/console?section=overview",
-    promptPasswordlessSetup: true,
-    passwordlessSetupPrompt: {
-      title: "Secure this live account",
-      message:
-        "Add a passkey or security key after login to reduce password-only access.",
-      setupUrl: "/console?section=security",
-    },
+    promptPasswordlessSetup,
+    passwordlessSetupPrompt,
   };
+}
+
+function shouldPromptPasswordlessSetupForLivePath(joinedPath: string) {
+  return joinedPath !== "auth/webauthn/authentication/verify";
 }
 
 function setLiveAuthCookies(response: NextResponse, payload: unknown) {
@@ -638,7 +671,10 @@ function createJsonResponseForLivePath(
     joinedPath === "auth/mfa/complete-login" ||
     joinedPath === "auth/webauthn/authentication/verify"
   ) {
-    const result = mapLiveAuthResult(payload);
+    const result = mapLiveAuthResult(payload, {
+      promptPasswordlessSetupFallback:
+        shouldPromptPasswordlessSetupForLivePath(joinedPath),
+    });
 
     if (!result) {
       return fail("Live authentication response could not be mapped", 409);
