@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  GoneException,
   HttpCode,
   HttpStatus,
   Post,
@@ -14,12 +16,17 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
+  ApiGoneResponse,
 } from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 
 import { AuthService } from '../services/core/auth.service';
 import { LoginDto } from '../dto/login.dto';
 import { OtpLoginDto } from '../dto/otp-login.dto';
+import {
+  RequestOtpLoginDto,
+  RequestOtpLoginResponseDto,
+} from '../dto/request-otp-login.dto';
 import { AuthResponseDto } from '../dto/auth-response.dto';
 import { RefreshTokenDto } from '../dto/refresh-token.dto';
 import { SocialLoginDto } from '../dto/social-login.dto';
@@ -32,6 +39,13 @@ import {
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { ActivateAccountDto } from '../dto/activate-account.dto';
 import { CreatePasswordDto } from '../dto/create-password.dto';
+import {
+  AccountActivationOtpRequestDto,
+  AccountActivationOtpResponseDto,
+  AccountActivationOtpVerifyDto,
+  AccountActivationOtpVerifyResponseDto,
+  AccountActivationPasswordDto,
+} from '../dto/account-activation.dto';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { VerifyPhoneOtpDto } from '../dto/verify-phone-otp.dto';
 import { PasswordResetService } from '../services/core/password-reset.service';
@@ -67,9 +81,9 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Authenticate with email and password',
+    summary: 'Authenticate with password',
     description:
-      'Authenticates an existing local account using email and password. On success, returns access token, refresh token, session identifier, and user payload.',
+      'Authenticates an existing account using password. Customers may use TIN, phone number, or email. Staff users must use their AD username / lanId and must already have a pre-created internal account. On success, returns access token, refresh token, session identifier, and user payload.',
   })
   @ApiOkResponse({
     description: 'Authentication successful.',
@@ -95,24 +109,38 @@ export class AuthController {
   @ApiOperation({
     summary: 'Authenticate with OTP',
     description:
-      'Authenticates an existing customer account using a one-time password issued to a known phone, email, or TIN identifier.',
+      'Deprecated. Direct OTP login has been removed. Use password or WebAuthn/passkey login; OTP remains available only for activation and MFA challenges.',
   })
-  @ApiOkResponse({
-    description: 'Authentication successful.',
-    type: AuthResponseDto,
-  })
-  @ApiUnauthorizedResponse({
-    description: 'Invalid identifier, OTP, or inactive account.',
+  @ApiGoneResponse({
+    description: 'Direct OTP login has been removed.',
   })
   async loginWithOtp(
-    @Body() dto: OtpLoginDto,
-    @Req() req: FastifyRequest,
+    @Body() _dto: OtpLoginDto,
+    @Req() _req: FastifyRequest,
   ): Promise<AuthResponseDto> {
-    return this.authService.loginWithOtp(dto, {
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'] ?? null,
-      deviceId: dto.deviceId ?? undefined,
-    });
+    throw new GoneException(
+      'Direct OTP login has been removed. Use password or passkey login.',
+    );
+  }
+
+  @Post('login/otp/request')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request customer OTP login code',
+    description:
+      'Deprecated. Direct OTP login has been removed. Use activation OTP or MFA OTP flows instead.',
+  })
+  @ApiGoneResponse({
+    description: 'Direct OTP login has been removed.',
+  })
+  async requestOtpLogin(
+    @Body() _dto: RequestOtpLoginDto,
+    @Req() _req: FastifyRequest,
+  ): Promise<RequestOtpLoginResponseDto> {
+    throw new GoneException(
+      'Direct OTP login has been removed. Use password or passkey login.',
+    );
   }
 
   @Post('refresh')
@@ -389,8 +417,83 @@ export class AuthController {
   async createPassword(
     @Body() dto: CreatePasswordDto,
   ): Promise<GenericAuthMessageDto> {
-    await this.activationService.createPassword(dto.token, dto.password);
+    const token = dto.token ?? dto.passwordSetupToken;
+    if (!token) {
+      throw new BadRequestException('Activation token is required');
+    }
+    if (dto.confirmPassword && dto.confirmPassword !== dto.password) {
+      throw new BadRequestException('Passwords must match');
+    }
+
+    await this.activationService.createPassword(token, dto.password);
     return { message: 'Password created successfully.' };
+  }
+
+  @Post('activation/otp')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request customer account activation OTP',
+    description:
+      'Validates that the supplied email or phone number matches the administrator-created customer contact, then sends an activation OTP through the selected channel.',
+  })
+  @ApiOkResponse({
+    description: 'Activation OTP issued successfully.',
+    type: AccountActivationOtpResponseDto,
+  })
+  async requestAccountActivationOtp(
+    @Body() dto: AccountActivationOtpRequestDto,
+  ): Promise<AccountActivationOtpResponseDto> {
+    return this.activationService.requestActivationOtp(dto);
+  }
+
+  @Post('activation/otp/verify')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify customer account activation OTP',
+    description:
+      'Verifies the customer activation OTP and returns a short-lived password setup token.',
+  })
+  @ApiOkResponse({
+    description: 'Activation OTP verified successfully.',
+    type: AccountActivationOtpVerifyResponseDto,
+  })
+  async verifyAccountActivationOtp(
+    @Body() dto: AccountActivationOtpVerifyDto,
+  ): Promise<AccountActivationOtpVerifyResponseDto> {
+    return this.activationService.verifyActivationOtp(dto);
+  }
+
+  @Post('activation/password')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete customer account activation',
+    description:
+      'Sets the local customer password, activates the customer account, creates an authenticated session, and returns the login response.',
+  })
+  @ApiOkResponse({
+    description: 'Account activated and signed in successfully.',
+    type: AuthResponseDto,
+  })
+  async completeAccountActivationPassword(
+    @Body() dto: AccountActivationPasswordDto,
+    @Req() req: FastifyRequest,
+  ): Promise<AuthResponseDto> {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords must match');
+    }
+
+    const user = await this.activationService.createPassword(
+      dto.passwordSetupToken,
+      dto.password,
+    );
+    return this.authService.createActivatedCustomerSession(user, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] ?? null,
+      deviceId: dto.deviceId ?? undefined,
+    });
   }
 
   @Post('send-email-verification')

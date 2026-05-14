@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OAuth2Client } from 'google-auth-library';
 import { AuthProvider } from '../../enums/auth-provider.enum';
@@ -12,7 +16,8 @@ export class GoogleTokenVerifierService {
   private readonly audience: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.audience = this.configService.get<string>('google.clientId') ?? '';
+    this.audience =
+      this.configService.get<string>('oauth.google.clientId') ?? '';
     this.client = new OAuth2Client(this.audience);
   }
 
@@ -23,6 +28,10 @@ export class GoogleTokenVerifierService {
     lastName: string;
     provider: AuthProvider.GOOGLE;
   }> {
+    if (!this.audience) {
+      throw new ServiceUnavailableException('Google SSO is not configured');
+    }
+
     const ticket = await this.client.verifyIdToken({
       idToken,
       audience: this.audience,

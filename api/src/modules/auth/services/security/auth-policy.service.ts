@@ -13,10 +13,15 @@ import { AuthFactorType } from '../../enums/auth-factor-type.enum';
 import { SecurityContext } from '../../interfaces/security-context.interface';
 import { SecurityAuditService } from './security-audit.service';
 import { UserSessionsService } from 'src/modules/users/services/user-session.service';
-import { AuthPolicyDecision, AuthRiskAssessment, RecoveryCodePolicyStatus } from '../../interfaces/auth-policy-decision.interface';
+import {
+  AuthPolicyDecision,
+  AuthRiskAssessment,
+  RecoveryCodePolicyStatus,
+} from '../../interfaces/auth-policy-decision.interface';
 import { RedisService } from 'src/modules/redis/redis.service';
 import { AuthEntryMethod } from '../../enums/auth-entry-method.enum';
 import { MfaRecoveryCodeService } from '../mfa/mfa-recovery-codes.service';
+import { PasswordPolicyService } from 'src/modules/users/services/password-policy.service';
 
 /**
  * Centralizes authentication and security policy decisions.
@@ -40,6 +45,7 @@ export class AuthPolicyService {
     private readonly userSessionsService: UserSessionsService,
     private readonly redisService: RedisService,
     private readonly mfaRecoveryCodeService: MfaRecoveryCodeService,
+    private readonly passwordPolicyService: PasswordPolicyService,
   ) {
     this.defaultMaxActiveSessions = this.configService.get<number>(
       'auth.maxActiveSessions',
@@ -106,6 +112,7 @@ export class AuthPolicyService {
 
     const risk = await this.assessRisk(user, method, context);
     const recoveryCodePolicy = await this.evaluateRecoveryCodePolicy(user);
+    const maxActiveSessions = await this.resolveMaxActiveSessions(user);
     this.applyRecoveryCodePolicyToRisk(risk, recoveryCodePolicy);
 
     const requiresMfa = this.shouldRequireMfa(user, method, risk);
@@ -121,7 +128,7 @@ export class AuthPolicyService {
           requiresMfa,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -134,7 +141,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp: false,
           allowedFactors: [AuthFactorType.SMS_OTP, AuthFactorType.EMAIL_OTP],
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -148,7 +155,7 @@ export class AuthPolicyService {
           requiresMfa,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -162,7 +169,7 @@ export class AuthPolicyService {
           requiresMfa,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -176,7 +183,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -190,7 +197,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -204,7 +211,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp,
           allowedFactors: this.buildAllowedFactors(user, method),
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -217,7 +224,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp: false,
           allowedFactors: [],
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -230,7 +237,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp: false,
           allowedFactors: [AuthFactorType.TOTP],
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
         };
@@ -243,7 +250,7 @@ export class AuthPolicyService {
           requiresMfa: false,
           requiresStepUp: false,
           allowedFactors: [],
-          maxActiveSessions: this.defaultMaxActiveSessions,
+          maxActiveSessions,
           risk,
           recoveryCodePolicy,
           reason: 'unsupported_authentication_method',
@@ -506,11 +513,17 @@ export class AuthPolicyService {
       throw new ForbiddenException('Password authentication is disabled');
     }
 
-    if (user.authProvider !== AuthProvider.LOCAL) {
-      throw new UnauthorizedException(
-        'This account does not support password authentication',
-      );
+    if (user.authProvider === AuthProvider.LOCAL) {
+      return;
     }
+
+    if (user.authProvider === AuthProvider.AD && this.isPrivilegedUser(user)) {
+      return;
+    }
+
+    throw new UnauthorizedException(
+      'This account does not support password authentication',
+    );
   }
 
   /**
@@ -691,6 +704,18 @@ export class AuthPolicyService {
    * Returns maximum active sessions allowed by policy.
    */
   getMaxActiveSessions(): number {
+    return this.defaultMaxActiveSessions;
+  }
+
+  private async resolveMaxActiveSessions(user: User): Promise<number> {
+    if (
+      user.authProvider === AuthProvider.LOCAL &&
+      user.roles.includes(UserRole.CUSTOMER)
+    ) {
+      const policy = await this.passwordPolicyService.getEffectivePolicy();
+      return policy.maxSessionsPerUser;
+    }
+
     return this.defaultMaxActiveSessions;
   }
 

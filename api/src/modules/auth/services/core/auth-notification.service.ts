@@ -1,8 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from '../../../notifications/services/notifications.service';
 import { NotificationChannel } from '../../../notifications/enums/notification-channel.enum';
 import { NotificationPriority } from '../../../notifications/enums/notification-priority.enum';
 import { NotificationType } from '../../../notifications/enums/notification-type.enum';
+
+type OtpLogPurpose =
+  | 'phone_verification'
+  | 'mfa_email_otp'
+  | 'mfa_sms_otp'
+  | 'customer_login_otp'
+  | 'customer_activation_otp';
+
+type DevelopmentOtpLogInput = {
+  purpose: OtpLogPurpose;
+  userId: string;
+  challengeId?: string;
+  destination?: string;
+  otp?: string;
+  expiresAt?: Date;
+};
 
 /**
  * Centralizes all authentication and security-related notifications.
@@ -15,7 +32,10 @@ import { NotificationType } from '../../../notifications/enums/notification-type
 export class AuthNotificationService {
   private readonly logger = new Logger(AuthNotificationService.name);
 
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * Sends an invitation notification to a newly created user.
@@ -23,21 +43,54 @@ export class AuthNotificationService {
   async sendUserInvitation(input: {
     userId: string;
     email: string;
+    phoneNumber?: string;
     firstName?: string;
     invitedByUserId?: string;
+    activationUrl?: string;
+    expiresAt?: Date;
   }): Promise<void> {
+    const greeting = input.firstName ? `Hello ${input.firstName},` : 'Hello,';
+    const expiryText = input.expiresAt
+      ? ` This link expires at ${input.expiresAt.toISOString()}.`
+      : '';
+    const activationMessage = input.activationUrl
+      ? `Activate your MTN Bulk Data account here: ${input.activationUrl}`
+      : 'Please activate your MTN Bulk Data account and create your password.';
+
     await this.notificationsService.create(
       {
         type: NotificationType.USER_INVITED,
-        channels: [NotificationChannel.EMAIL, NotificationChannel.IN_APP],
+        channels: [NotificationChannel.EMAIL],
         recipientIds: [input.userId],
-        subject: 'You have been invited',
-        body: 'Your account has been created. Please activate your account and create your password.',
+        subject: 'Activate your MTN Bulk Data account',
+        body: `${greeting}\n\n${activationMessage}\n\nOpen the link, choose email or SMS, then use the code sent to you to set your password.${expiryText}`,
         priority: NotificationPriority.HIGH,
         data: {
           email: input.email,
           firstName: input.firstName,
           invitedByUserId: input.invitedByUserId,
+          activationUrl: input.activationUrl,
+          expiresAt: input.expiresAt?.toISOString(),
+        },
+      },
+      input.invitedByUserId,
+    );
+
+    if (!input.phoneNumber || !input.activationUrl) {
+      return;
+    }
+
+    await this.notificationsService.create(
+      {
+        type: NotificationType.USER_INVITED,
+        channels: [NotificationChannel.SMS],
+        recipientIds: [input.userId],
+        body: `MTN Bulk Data: activate your account at ${input.activationUrl}. Choose email or SMS on the page to receive your code.${expiryText}`,
+        priority: NotificationPriority.HIGH,
+        data: {
+          phoneNumber: input.phoneNumber,
+          activationUrl: input.activationUrl,
+          expiresAt: input.expiresAt?.toISOString(),
         },
       },
       input.invitedByUserId,
@@ -160,17 +213,35 @@ export class AuthNotificationService {
     phoneNumber?: string;
     otp?: string;
     expiresAt?: Date;
+    purpose?: Extract<OtpLogPurpose, 'phone_verification' | 'mfa_sms_otp'>;
+    challengeId?: string;
   }): Promise<void> {
+    this.logOtpInDevelopment({
+      purpose: input.purpose ?? 'phone_verification',
+      userId: input.userId,
+      challengeId: input.challengeId,
+      destination: input.phoneNumber,
+      otp: input.otp,
+      expiresAt: input.expiresAt,
+    });
+
     await this.notificationsService.create({
       type: NotificationType.SYSTEM_ALERT,
       channels: [NotificationChannel.SMS],
       recipientIds: [input.userId],
-      body: 'Your phone verification code has been generated.',
+      body: input.otp
+        ? this.buildOtpAutofillMessage({
+            label: 'MTN Bulk Data verification',
+            otp: input.otp,
+            expiresAt: input.expiresAt,
+          })
+        : 'Your phone verification code has been generated.',
       priority: NotificationPriority.HIGH,
       data: {
         phoneNumber: input.phoneNumber,
-        otp: input.otp,
         expiresAt: input.expiresAt?.toISOString(),
+        containsSensitiveCode: Boolean(input.otp),
+        purpose: input.purpose ?? 'phone_verification',
       },
     });
   }
@@ -343,22 +414,203 @@ export class AuthNotificationService {
   async sendEmailOtpMfaRequested(input: {
     userId: string;
     email: string;
+    challengeId?: string;
     otp: string;
     expiresAt: Date;
   }): Promise<void> {
+    this.logOtpInDevelopment({
+      purpose: 'mfa_email_otp',
+      userId: input.userId,
+      challengeId: input.challengeId,
+      destination: input.email,
+      otp: input.otp,
+      expiresAt: input.expiresAt,
+    });
+
     await this.notificationsService.create({
       type: NotificationType.SYSTEM_ALERT,
       channels: [NotificationChannel.EMAIL],
       recipientIds: [input.userId],
       subject: 'Your authentication code',
-      body: 'Use the one-time code sent to complete your sign-in.',
+      body: this.buildOtpAutofillMessage({
+        label: 'MTN Bulk Data authentication',
+        otp: input.otp,
+        expiresAt: input.expiresAt,
+      }),
       priority: NotificationPriority.HIGH,
       data: {
         email: input.email,
-        otp: input.otp,
         expiresAt: input.expiresAt.toISOString(),
+        containsSensitiveCode: true,
         purpose: 'mfa_email_otp',
       },
     });
+  }
+
+  async sendCustomerLoginOtpRequested(input: {
+    userId: string;
+    challengeId?: string;
+    deliveryChannel: 'sms' | 'email';
+    destination: string;
+    otp: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    this.logOtpInDevelopment({
+      purpose: 'customer_login_otp',
+      userId: input.userId,
+      challengeId: input.challengeId,
+      destination: input.destination,
+      otp: input.otp,
+      expiresAt: input.expiresAt,
+    });
+
+    const channel =
+      input.deliveryChannel === 'email'
+        ? NotificationChannel.EMAIL
+        : NotificationChannel.SMS;
+
+    await this.notificationsService.create({
+      type: NotificationType.SYSTEM_ALERT,
+      channels: [channel],
+      recipientIds: [input.userId],
+      subject:
+        input.deliveryChannel === 'email' ? 'Your sign-in code' : undefined,
+      body: this.buildOtpAutofillMessage({
+        label: 'MTN Bulk Data sign-in',
+        otp: input.otp,
+        expiresAt: input.expiresAt,
+      }),
+      priority: NotificationPriority.HIGH,
+      data: {
+        deliveryChannel: input.deliveryChannel,
+        destination: input.destination,
+        expiresAt: input.expiresAt.toISOString(),
+        containsSensitiveCode: true,
+        purpose: 'customer_login_otp',
+      },
+    });
+  }
+
+  async sendCustomerActivationOtpRequested(input: {
+    userId: string;
+    challengeId?: string;
+    deliveryChannel: 'sms' | 'email';
+    destination: string;
+    otp: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    this.logOtpInDevelopment({
+      purpose: 'customer_activation_otp',
+      userId: input.userId,
+      challengeId: input.challengeId,
+      destination: input.destination,
+      otp: input.otp,
+      expiresAt: input.expiresAt,
+    });
+
+    const channel =
+      input.deliveryChannel === 'email'
+        ? NotificationChannel.EMAIL
+        : NotificationChannel.SMS;
+
+    await this.notificationsService.create({
+      type: NotificationType.SYSTEM_ALERT,
+      channels: [channel],
+      recipientIds: [input.userId],
+      subject:
+        input.deliveryChannel === 'email'
+          ? 'Your account activation code'
+          : undefined,
+      body: this.buildOtpAutofillMessage({
+        label: 'MTN Bulk Data account activation',
+        otp: input.otp,
+        expiresAt: input.expiresAt,
+      }),
+      priority: NotificationPriority.HIGH,
+      data: {
+        deliveryChannel: input.deliveryChannel,
+        destination: input.destination,
+        expiresAt: input.expiresAt.toISOString(),
+        containsSensitiveCode: true,
+        purpose: 'customer_activation_otp',
+      },
+    });
+  }
+
+  private logOtpInDevelopment(input: DevelopmentOtpLogInput): void {
+    const environment = this.configService.get<string>(
+      'app.env',
+      process.env.NODE_ENV ?? 'development',
+    );
+
+    if (environment !== 'development' || !input.otp) {
+      return;
+    }
+
+    this.logger.warn(
+      JSON.stringify({
+        event: 'development_otp_issued',
+        purpose: input.purpose,
+        userId: input.userId,
+        challengeId: input.challengeId,
+        destination: this.maskDestination(input.destination),
+        otp: input.otp,
+        expiresAt: input.expiresAt?.toISOString(),
+      }),
+    );
+  }
+
+  private buildOtpAutofillMessage(input: {
+    label: string;
+    otp: string;
+    expiresAt?: Date;
+  }): string {
+    const expiresAt =
+      input.expiresAt?.toISOString() ?? 'the stated expiry time';
+
+    return `${input.otp} is your ${input.label} code.\nIt expires at ${expiresAt}.\n\n@${this.otpAutofillDomain()} #${input.otp}`;
+  }
+
+  private otpAutofillDomain(): string {
+    const configuredDomain =
+      this.configService.get<string>('auth.otpAutofillDomain') ??
+      process.env.OTP_AUTOFILL_DOMAIN;
+
+    if (configuredDomain?.trim()) {
+      return configuredDomain.trim().replace(/^@/, '');
+    }
+
+    const configuredUrl =
+      this.configService.get<string>('app.frontendUrl') ??
+      process.env.FRONTEND_URL;
+
+    if (configuredUrl) {
+      try {
+        return new URL(configuredUrl).hostname;
+      } catch {
+        return configuredUrl.replace(/^https?:\/\//, '').split('/')[0];
+      }
+    }
+
+    return 'bulkdata.mtn.co.ug';
+  }
+
+  private maskDestination(destination?: string): string | undefined {
+    if (!destination) {
+      return undefined;
+    }
+
+    const [localPart, domain] = destination.split('@');
+    if (domain) {
+      const visibleLocal = localPart.slice(0, 2);
+      return `${visibleLocal}${'*'.repeat(Math.max(localPart.length - 2, 2))}@${domain}`;
+    }
+
+    const digits = destination.replace(/\D/g, '');
+    if (digits.length >= 4) {
+      return `${'*'.repeat(Math.max(digits.length - 4, 4))}${digits.slice(-4)}`;
+    }
+
+    return '****';
   }
 }

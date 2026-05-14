@@ -11,8 +11,6 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
 import { User } from 'src/modules/users/entities/user.entity';
 import { UserRole } from 'src/modules/users/enums/user-role.enum';
 
-
-
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}

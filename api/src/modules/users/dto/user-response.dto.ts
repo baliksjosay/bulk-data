@@ -32,6 +32,14 @@ export class UserResponseDto {
   phoneNumber?: string;
 
   @Expose()
+  @ApiPropertyOptional({
+    example: 'cus-wavenet',
+    description:
+      'Customer account identifier linked to this user when the user is a customer.',
+  })
+  customerId?: string;
+
+  @Expose()
   @ApiProperty({
     enum: AuthProvider,
     example: AuthProvider.LOCAL,

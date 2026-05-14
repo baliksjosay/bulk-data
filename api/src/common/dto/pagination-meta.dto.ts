@@ -24,4 +24,16 @@ export class PaginationMetaDto {
     example: 7,
   })
   totalPages: number;
+
+  @ApiProperty({
+    description: 'Whether another page is available after the current page.',
+    example: true,
+  })
+  hasNextPage: boolean;
+
+  @ApiProperty({
+    description: 'Whether a page is available before the current page.',
+    example: false,
+  })
+  hasPreviousPage: boolean;
 }

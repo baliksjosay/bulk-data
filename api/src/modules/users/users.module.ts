@@ -13,6 +13,8 @@ import { UserController } from './controllers/user.controller';
 import { UserSessionsController } from './controllers/user-session.controller';
 import { UserPreferencesController } from './controllers/user-preferences.controller';
 import { InitialAdminSeedService } from './services/initial-admin-seed.service';
+import { PasswordPolicyService } from './services/password-policy.service';
+import { DormantCustomerAccountLockJob } from './jobs/dormant-customer-account-lock.job';
 
 /**
  * Users Module
@@ -34,6 +36,8 @@ import { InitialAdminSeedService } from './services/initial-admin-seed.service';
     UserRepository,
     UserSessionRepository,
     UserPreferenceRepository,
+    PasswordPolicyService,
+    DormantCustomerAccountLockJob,
   ],
   exports: [
     UserService,
@@ -43,6 +47,7 @@ import { InitialAdminSeedService } from './services/initial-admin-seed.service';
     UserRepository,
     UserSessionRepository,
     UserPreferenceRepository,
+    PasswordPolicyService,
   ],
 })
 export class UserModule {}

@@ -19,5 +19,3 @@ export interface SecurityContext {
    */
   occurredAt?: Date | null;
 }
-
-

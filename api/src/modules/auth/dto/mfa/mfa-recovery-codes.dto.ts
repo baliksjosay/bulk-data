@@ -33,7 +33,6 @@ export class AcknowledgeRecoveryCodesDto {
   batchId: string;
 }
 
-
 export class GenerateRecoveryCodesDto {
   @ApiPropertyOptional({
     description: 'Current password for re-authentication.',

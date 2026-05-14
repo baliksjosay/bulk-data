@@ -5,6 +5,35 @@
  * Usage: inject ConfigService and call config.get<string>('database.host')
  */
 
+const booleanEnv = (...keys: string[]): boolean =>
+  keys.some((key) => process.env[key] === 'true');
+
+const firstEnv = (...keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
+const buildProviderUrl = (
+  baseUrl: string | undefined,
+  path: string | undefined,
+): string => {
+  if (!baseUrl || !path) {
+    return '';
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  const normalizedPath = path.replace(/^\/+/, '');
+
+  return new URL(normalizedPath, normalizedBase).toString();
+};
+
 export const configuration = () => ({
   app: {
     name: process.env.APP_NAME ?? 'Compleo-MTK',
@@ -59,10 +88,14 @@ export const configuration = () => ({
       process.env.AUTH_MAX_ACTIVE_SESSIONS ?? '3',
       10,
     ),
-    requireVerifiedEmailLocal:
-      process.env.AUTH_REQUIRE_VERIFIED_ESMTP_LOCAL === 'true',
-    requireVerifiedEmailSocial:
-      process.env.AUTH_REQUIRE_VERIFIED_ESMTP_SOCIAL === 'true',
+    requireVerifiedEmailLocal: booleanEnv(
+      'AUTH_REQUIRE_VERIFIED_EMAIL_LOCAL',
+      'AUTH_REQUIRE_VERIFIED_ESMTP_LOCAL',
+    ),
+    requireVerifiedEmailSocial: booleanEnv(
+      'AUTH_REQUIRE_VERIFIED_EMAIL_SOCIAL',
+      'AUTH_REQUIRE_VERIFIED_ESMTP_SOCIAL',
+    ),
     requireVerifiedPhoneSensitive:
       process.env.AUTH_REQUIRE_VERIFIED_PHONE_SENSITIVE === 'true',
 
@@ -72,11 +105,26 @@ export const configuration = () => ({
     allowWebauthn: process.env.AUTH_ALLOW_WEBAUTHN !== 'false',
     allowPasskey: process.env.AUTH_ALLOW_PASSKEY !== 'false',
     allowSecurityKey: process.env.AUTH_ALLOW_SECURITY_KEY !== 'false',
+    otpAutofillDomain: process.env.OTP_AUTOFILL_DOMAIN ?? 'bulkdata.mtn.co.ug',
 
     deviceTrustStrict: process.env.AUTH_DEVICE_TRUST_STRICT === 'true',
     blockOnRecoveryPolicyViolation:
       process.env.AUTH_BLOCK_ON_RECOVERY_POLICY_VIOLATION === 'true',
     forceMfaForPrivileged: process.env.AUTH_FORCE_MFA_FOR_PRIVILEGED === 'true',
+  },
+
+  identityProviders: {
+    activeDirectory: {
+      url:
+        firstEnv('MTNAD_LOGIN_URL', 'MTN_AD_LOGIN_URL', 'LDAP_API_SERVICE') ??
+        '',
+      timeoutMs: Number.parseInt(
+        process.env.MTN_AD_LOGIN_TIMEOUT_MS ??
+          process.env.LDAP_API_TIMEOUT_MS ??
+          '60000',
+        10,
+      ),
+    },
   },
 
   mfa: {
@@ -160,7 +208,18 @@ export const configuration = () => ({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
       callbackUrl:
         process.env.GOOGLE_CALLBACK_URL ??
-        'http://localhost:3000/api/auth/google/callback',
+        'http://localhost:3000/auth/callback/google',
+    },
+    microsoft: {
+      tenantId: process.env.MICROSOFT_TENANT_ID ?? 'common',
+      clientId: process.env.MICROSOFT_CLIENT_ID ?? '',
+      clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '',
+      callbackUrl:
+        process.env.MICROSOFT_CALLBACK_URL ??
+        'http://localhost:3000/auth/callback/microsoft',
+      scope:
+        process.env.MICROSOFT_SCOPE ??
+        'openid profile email offline_access User.Read',
     },
     apple: {
       clientId: process.env.APPLE_CLIENT_ID ?? '',
@@ -179,13 +238,19 @@ export const configuration = () => ({
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER ?? '',
     pass: process.env.SMTP_PASS ?? '',
-    from:
-      process.env.SENDER_ADDRESS ??
-      'Bulk Data Wholesale <no-reply@bulk-data.com>',
+    from: process.env.SENDER_ADDRESS ?? 'bulkdata@mtn.co.ug',
   },
 
   sms: {
-    provider: process.env.SMS_PROVIDER ?? 'africastalking',
+    provider:
+      process.env.SMS_PROVIDER ??
+      (process.env.NODE_ENV === 'production' ? 'mtn_sms' : 'africastalking'),
+    mtn: {
+      baseUrl: process.env.MTN_SMS_BASE_URL ?? '',
+      username: process.env.MTN_SMS_USERNAME ?? '',
+      password: process.env.MTN_SMS_PASSWORD ?? '',
+      senderId: process.env.MTN_SMS_SENDER_ID ?? '',
+    },
     africastalking: {
       username: process.env.AFRICASTALKING_USERNAME ?? '',
       app: process.env.AFRICASTALKING_APP ?? '',
@@ -197,7 +262,10 @@ export const configuration = () => ({
 
   firebase: {
     projectId: process.env.FIREBASE_PROJECT_ID ?? '',
-    clientEmail: process.env.FIREBASE_CLIENT_ESMTP ?? '',
+    clientEmail:
+      process.env.FIREBASE_CLIENT_EMAIL ??
+      process.env.FIREBASE_CLIENT_ESMTP ??
+      '',
     privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') ?? '',
   },
 
@@ -217,52 +285,31 @@ export const configuration = () => ({
     provider: process.env.PROVISIONING_PROVIDER ?? 'pcrf',
     pcrf: {
       baseUrl:
-        process.env.PROVISIONING_PCRF_BASE_URL ??
-        process.env.PCRF_BASE_URL ??
-        '',
+        firstEnv('BULK_DATA_API_BASE_URL', 'PROVISIONING_PCRF_BASE_URL') ?? '',
       timeoutMs: Number.parseInt(
         process.env.PROVISIONING_PCRF_TIMEOUT_MS ??
-          process.env.PCRF_TIMEOUT_MS ??
+          process.env.BULK_DATA_API_TIMEOUT_MS ??
           '15000',
         10,
       ),
-      bearerToken:
-        process.env.PROVISIONING_PCRF_BEARER_TOKEN ??
-        process.env.PCRF_BEARER_TOKEN ??
-        '',
-      apiKey:
-        process.env.PROVISIONING_PCRF_API_KEY ?? process.env.PCRF_API_KEY ?? '',
       paths: {
         groupMember:
           process.env.PROVISIONING_PCRF_GROUP_MEMBER_PATH ??
-          process.env.PCRF_GROUP_MEMBER_PATH ??
           '/api/pcrf/group-member',
         groupMembersBulk:
           process.env.PROVISIONING_PCRF_GROUP_MEMBERS_BULK_PATH ??
-          process.env.PCRF_GROUP_MEMBERS_BULK_PATH ??
           '/api/pcrf/group-members/bulk',
         groupMemberDelete:
           process.env.PROVISIONING_PCRF_GROUP_MEMBER_DELETE_PATH ??
-          process.env.PCRF_GROUP_MEMBER_DELETE_PATH ??
           '/api/pcrf/group-member/delete',
         subscriptionUpdate:
           process.env.PROVISIONING_PCRF_SUBSCRIPTIONS_UPDATE_PATH ??
-          process.env.PCRF_SUBSCRIPTIONS_UPDATE_PATH ??
           '/api/pcrf/subscriptions/update',
         subscriber:
           process.env.PROVISIONING_PCRF_SUBSCRIBER_PATH ??
-          process.env.PCRF_SUBSCRIBER_PATH ??
           '/api/pcrf/subscriber',
         subscribeService:
-          process.env.PROVISIONING_PCRF_SUBSCRIBE_PATH ??
-          process.env.PCRF_SUBSCRIBE_PATH ??
-          '/api/pcrf/subscribe',
-      },
-      urls: {
-        subscribeService:
-          process.env.PROVISIONING_PCRF_SUBSCRIBE_URL ??
-          process.env.PCRF_SUBSCRIBE_URL ??
-          '',
+          process.env.PROVISIONING_PCRF_SUBSCRIBE_PATH ?? '/api/pcrf/subscribe',
       },
     },
   },
@@ -271,11 +318,18 @@ export const configuration = () => ({
     simulateStatusUpdates:
       process.env.SIMULATE_PAYMENT_STATUS_UPDATES === 'true',
     provider: {
-      initUrl: process.env.PAYMENT_PROVIDER_INIT_URL ?? '',
-      apiKey: process.env.PAYMENT_PROVIDER_API_KEY ?? '',
-      bearerToken: process.env.PAYMENT_PROVIDER_BEARER_TOKEN ?? '',
+      baseUrl:
+        firstEnv('BULK_DATA_API_BASE_URL', 'PROVISIONING_PCRF_BASE_URL') ?? '',
+      initUrl:
+        firstEnv('PAYMENT_PROVIDER_INIT_URL') ??
+        buildProviderUrl(
+          firstEnv('BULK_DATA_API_BASE_URL', 'PROVISIONING_PCRF_BASE_URL'),
+          process.env.PAYMENT_CARD_PROVIDER_INIT_PATH,
+        ),
       timeoutMs: Number.parseInt(
-        process.env.PAYMENT_PROVIDER_TIMEOUT_MS ?? '15000',
+        process.env.PAYMENT_PROVIDER_TIMEOUT_MS ??
+          process.env.BULK_DATA_API_TIMEOUT_MS ??
+          '15000',
         10,
       ),
       callbackBaseUrl:
@@ -284,18 +338,15 @@ export const configuration = () => ({
         'http://localhost:9089',
     },
     prnProvider: {
-      initUrl: process.env.PAYMENT_PRN_PROVIDER_INIT_URL ?? '',
-      apiKey:
-        process.env.PAYMENT_PRN_PROVIDER_API_KEY ??
-        process.env.PAYMENT_PROVIDER_API_KEY ??
-        '',
-      bearerToken:
-        process.env.PAYMENT_PRN_PROVIDER_BEARER_TOKEN ??
-        process.env.PAYMENT_PROVIDER_BEARER_TOKEN ??
-        '',
+      initUrl:
+        firstEnv('PAYMENT_PRN_PROVIDER_INIT_URL') ??
+        buildProviderUrl(
+          firstEnv('BULK_DATA_API_BASE_URL', 'PROVISIONING_PCRF_BASE_URL'),
+          process.env.PAYMENT_PRN_REFERENCE_PATH ?? '/api/payment/reference',
+        ),
       timeoutMs: Number.parseInt(
         process.env.PAYMENT_PRN_PROVIDER_TIMEOUT_MS ??
-          process.env.PAYMENT_PROVIDER_TIMEOUT_MS ??
+          process.env.BULK_DATA_API_TIMEOUT_MS ??
           '15000',
         10,
       ),
@@ -303,61 +354,38 @@ export const configuration = () => ({
     momoProvider: {
       mode: process.env.PAYMENT_MOMO_PROVIDER_MODE ?? 'provider',
       initUrl: process.env.PAYMENT_MOMO_PROVIDER_INIT_URL ?? '',
-      apiKey:
-        process.env.PAYMENT_MOMO_PROVIDER_API_KEY ??
-        process.env.PAYMENT_PROVIDER_API_KEY ??
-        '',
-      bearerToken:
-        process.env.PAYMENT_MOMO_PROVIDER_BEARER_TOKEN ??
-        process.env.PAYMENT_PROVIDER_BEARER_TOKEN ??
-        '',
       timeoutMs: Number.parseInt(
         process.env.PAYMENT_MOMO_PROVIDER_TIMEOUT_MS ??
-          process.env.PAYMENT_PROVIDER_TIMEOUT_MS ??
+          process.env.BULK_DATA_API_TIMEOUT_MS ??
           '15000',
         10,
       ),
       spTransfer: {
-        url: process.env.PAYMENT_MOMO_SPTRANSFER_URL ?? '',
+        url: firstEnv('PAYMENT_MOMO_SPTRANSFER_URL') ?? '',
         baseUrl:
-          process.env.PAYMENT_MOMO_SPTRANSFER_BASE_URL ??
-          process.env.ECW_API_URL ??
-          '',
+          firstEnv(
+            'PAYMENT_MOMO_ECW_URL',
+            'PAYMENT_MOMO_SPTRANSFER_BASE_URL',
+            'ECW_API_URL',
+          ) ?? '',
         path: process.env.PAYMENT_MOMO_SPTRANSFER_PATH ?? '/sptransfer/',
-        fromFri: process.env.PAYMENT_MOMO_SPTRANSFER_FROM_FRI ?? '',
         toFri: process.env.PAYMENT_MOMO_SPTRANSFER_TO_FRI ?? '',
-        username: process.env.PAYMENT_MOMO_SPTRANSFER_USERNAME ?? '',
-        password: process.env.PAYMENT_MOMO_SPTRANSFER_PASSWORD ?? '',
       },
     },
     airtimeProvider: {
       initUrl:
-        process.env.PAYMENT_AIRTIME_PROVIDER_INIT_URL ??
-        (process.env.PROVISIONING_PCRF_BASE_URL
-          ? new URL(
-              (
-                process.env.PAYMENT_AIRTIME_UPDATE_BALANCE_PATH ??
-                '/api/update-balance-and-date'
-              ).replace(/^\/+/, ''),
-              process.env.PROVISIONING_PCRF_BASE_URL.endsWith('/')
-                ? process.env.PROVISIONING_PCRF_BASE_URL
-                : `${process.env.PROVISIONING_PCRF_BASE_URL}/`,
-            ).toString()
-          : ''),
+        firstEnv('PAYMENT_AIRTIME_PROVIDER_INIT_URL') ??
+        buildProviderUrl(
+          firstEnv('BULK_DATA_API_BASE_URL', 'PROVISIONING_PCRF_BASE_URL'),
+          process.env.PAYMENT_AIRTIME_UPDATE_BALANCE_PATH ??
+            '/api/update-balance-and-date',
+        ),
       updateBalancePath:
         process.env.PAYMENT_AIRTIME_UPDATE_BALANCE_PATH ??
         '/api/update-balance-and-date',
-      apiKey:
-        process.env.PAYMENT_AIRTIME_PROVIDER_API_KEY ??
-        process.env.PAYMENT_PROVIDER_API_KEY ??
-        '',
-      bearerToken:
-        process.env.PAYMENT_AIRTIME_PROVIDER_BEARER_TOKEN ??
-        process.env.PAYMENT_PROVIDER_BEARER_TOKEN ??
-        '',
       timeoutMs: Number.parseInt(
         process.env.PAYMENT_AIRTIME_PROVIDER_TIMEOUT_MS ??
-          process.env.PAYMENT_PROVIDER_TIMEOUT_MS ??
+          process.env.BULK_DATA_API_TIMEOUT_MS ??
           '15000',
         10,
       ),
@@ -366,7 +394,10 @@ export const configuration = () => ({
 
   security: {
     auditLogEnabled: process.env.SECURITY_AUDIT_LOG_ENABLED === 'true',
-    alertEmailEnabled: process.env.SECURITY_ALERT_ESMTP_ENABLED === 'true',
+    alertEmailEnabled: booleanEnv(
+      'SECURITY_ALERT_EMAIL_ENABLED',
+      'SECURITY_ALERT_ESMTP_ENABLED',
+    ),
     alertSmsEnabled: process.env.SECURITY_ALERT_SMS_ENABLED === 'true',
   },
 

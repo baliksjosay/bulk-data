@@ -7,7 +7,7 @@ import { HttpModule } from '@nestjs/axios';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BullModule } from '@nestjs/bullmq';
 import { MailerModule } from '@nestjs-modules/mailer';
-import { configuration} from './config';
+import { configuration } from './config';
 import { validationSchema } from './config/validation.schema';
 import { databaseConfig } from './config/database.config';
 import { bullConfig } from './config/bull.config';
@@ -33,7 +33,6 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 const uploadDir = process.env.UPLOAD_DIR
   ? resolve(process.env.UPLOAD_DIR) // ✅ normalizes absolute/relative
   : resolve(process.cwd(), '..', 'data', 'uploads');
-
 
 @Module({
   imports: [

@@ -12,18 +12,33 @@ import {
  */
 export class LoginDto {
   @ApiPropertyOptional({
-    description: 'Registered email address for password login.',
+    description:
+      'Single password-login identifier. Customers may use TIN, phone number, or email. Staff users must use their AD username / lanId.',
+    example: 'balikujo',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  identifier?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Registered customer email address for password login. Staff users must use username / lanId instead.',
     example: 'joseph@example.com',
   })
-  @ValidateIf((dto: LoginDto) => !dto.username && !dto.phoneNumber)
+  @ValidateIf(
+    (dto: LoginDto) => !dto.identifier && !dto.username && !dto.phoneNumber,
+  )
   @IsEmail()
   email?: string;
 
   @ApiPropertyOptional({
-    description: 'Username for password login.',
-    example: 'joseph',
+    description: 'AD username / lanId for staff password login.',
+    example: 'balikujo',
   })
-  @ValidateIf((dto: LoginDto) => !dto.email && !dto.phoneNumber)
+  @ValidateIf(
+    (dto: LoginDto) => !dto.identifier && !dto.email && !dto.phoneNumber,
+  )
   @IsString()
   @MaxLength(255)
   username?: string;
@@ -32,7 +47,7 @@ export class LoginDto {
     description: 'Registered phone number for password login.',
     example: '+256789172796',
   })
-  @ValidateIf((dto: LoginDto) => !dto.email && !dto.username)
+  @ValidateIf((dto: LoginDto) => !dto.identifier && !dto.email && !dto.username)
   @IsString()
   @MaxLength(32)
   phoneNumber?: string;

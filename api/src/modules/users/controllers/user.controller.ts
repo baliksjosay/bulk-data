@@ -85,7 +85,7 @@ export class UserController {
   @ApiOperation({
     summary: 'Create an admin or support user',
     description:
-      'Allows an existing administrator to create a staff account using phoneNumber, email, lanId, and role. The role is limited to ADMIN or SUPPORT.',
+      'Allows an existing administrator to create a staff account with an email address. Optional contact details and role can be supplied, and directory profile details are completed after first successful login.',
   })
   @ApiCreatedResponse({
     description: 'Staff user created successfully.',
@@ -95,7 +95,7 @@ export class UserController {
     description: 'Validation failed or unsupported staff role was requested.',
   })
   @ApiConflictResponse({
-    description: 'Email address, phone number, or LAN ID already exists.',
+    description: 'Email address, phone number, or AD username already exists.',
   })
   @ApiUnauthorizedResponse({ description: 'Unauthorized.' })
   @ApiForbiddenResponse({ description: 'Forbidden.' })
@@ -107,6 +107,38 @@ export class UserController {
     return plainToInstance(UserResponseDto, user, {
       excludeExtraneousValues: true,
     });
+  }
+
+  @Get('staff')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT)
+  @ApiOperation({
+    summary: 'List admin and support users',
+    description:
+      'Returns a paginated staff user list for administration and support access management.',
+  })
+  @ApiOkResponse({
+    description: 'Staff users retrieved successfully.',
+    type: PaginatedUserResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Unauthorized.' })
+  @ApiForbiddenResponse({ description: 'Forbidden.' })
+  async findStaff(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Query() query: UserQueryDto,
+  ): Promise<PaginatedUserResponseDto> {
+    const result = await this.userService.findStaffForActor(currentUser, query);
+
+    return {
+      data: toDtos(UserResponseDto, result.data),
+      meta: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+        hasNextPage: result.hasNextPage,
+        hasPreviousPage: result.hasPreviousPage,
+      },
+    };
   }
 
   @Get()
@@ -135,6 +167,8 @@ export class UserController {
         limit: result.limit,
         total: result.total,
         totalPages: result.totalPages,
+        hasNextPage: result.hasNextPage,
+        hasPreviousPage: result.hasPreviousPage,
       },
     };
   }

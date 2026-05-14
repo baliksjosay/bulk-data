@@ -12,7 +12,6 @@ import { UserSessionsService } from '../services/user-session.service';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { UserSessionResponseDto } from '../dto/user-session-response.dto';
 
-
 @ApiTags('User Sessions')
 @ApiBearerAuth()
 @Controller('users/me/sessions')

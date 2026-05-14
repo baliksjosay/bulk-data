@@ -21,7 +21,10 @@ export class AccountLockService {
     email: string,
     reason = 'too_many_failed_login_attempts',
   ): Promise<User> {
-    const user = await this.usersService.lockUser(userId, this.defaultLockMinutes);
+    const user = await this.usersService.lockUser(
+      userId,
+      this.defaultLockMinutes,
+    );
 
     await this.audit.log({
       eventType: SecurityEventType.ACCOUNT_LOCKED,
@@ -30,7 +33,7 @@ export class AccountLockService {
       success: false,
       reason,
     });
-    return user
+    return user;
   }
 
   async unlockUser(

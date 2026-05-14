@@ -67,6 +67,12 @@ export const validationSchema = Joi.object({
 
   // Auth Policy
   AUTH_MAX_ACTIVE_SESSIONS: Joi.number().min(1).default(3),
+  AUTH_REQUIRE_VERIFIED_EMAIL_LOCAL: Joi.boolean()
+    .truthy('true')
+    .falsy('false'),
+  AUTH_REQUIRE_VERIFIED_EMAIL_SOCIAL: Joi.boolean()
+    .truthy('true')
+    .falsy('false'),
   AUTH_REQUIRE_VERIFIED_ESMTP_LOCAL: Joi.boolean()
     .truthy('true')
     .falsy('false'),
@@ -84,8 +90,12 @@ export const validationSchema = Joi.object({
   AUTH_ALLOW_WEBAUTHN: Joi.boolean().truthy('true').falsy('false'),
   AUTH_ALLOW_PASSKEY: Joi.boolean().truthy('true').falsy('false'),
   AUTH_ALLOW_SECURITY_KEY: Joi.boolean().truthy('true').falsy('false'),
+  OTP_AUTOFILL_DOMAIN: Joi.string().default('bulkdata.mtn.co.ug'),
   MTNAD_LOGIN_URL: Joi.string().uri().allow('').optional(),
   MTN_AD_LOGIN_URL: Joi.string().uri().allow('').optional(),
+  LDAP_API_SERVICE: Joi.string().uri().allow('').optional(),
+  MTN_AD_LOGIN_TIMEOUT_MS: Joi.number().min(1000).default(60000),
+  LDAP_API_TIMEOUT_MS: Joi.number().min(1000).optional(),
 
   // Bootstrap local administrator
   BOOTSTRAP_LOCAL_ADMIN: Joi.boolean()
@@ -156,7 +166,14 @@ export const validationSchema = Joi.object({
   // OAuth
   GOOGLE_CLIENT_ID: Joi.string().allow('').optional(),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
-  GOOGLE_CALLBACK_URL: Joi.string().uri(),
+  GOOGLE_CALLBACK_URL: Joi.string().uri().allow('').optional(),
+  MICROSOFT_TENANT_ID: Joi.string().allow('').default('common'),
+  MICROSOFT_CLIENT_ID: Joi.string().allow('').optional(),
+  MICROSOFT_CLIENT_SECRET: Joi.string().allow('').optional(),
+  MICROSOFT_CALLBACK_URL: Joi.string().uri().allow('').optional(),
+  MICROSOFT_SCOPE: Joi.string()
+    .allow('')
+    .default('openid profile email offline_access User.Read'),
 
   APPLE_CLIENT_ID: Joi.string().allow('').optional(),
   APPLE_TEAM_ID: Joi.string().allow('').optional(),
@@ -170,10 +187,40 @@ export const validationSchema = Joi.object({
   SMTP_SECURE: Joi.boolean().truthy('true').falsy('false'),
   SMTP_USER: Joi.string().allow('').optional(),
   SMTP_PASS: Joi.string().allow('').optional(),
-  SENDER_ADDRESS: Joi.string().required(),
+  SENDER_NAME: Joi.string().default('MTN Bulk Data'),
+  SENDER_ADDRESS: Joi.string().email().required(),
 
   // SMS
-  SMS_PROVIDER: Joi.string().default('africastalking'),
+  MTN_SMS_USERNAME: Joi.string().when('SMS_PROVIDER', {
+    is: 'mtn_sms',
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  MTN_SMS_PASSWORD: Joi.string().when('SMS_PROVIDER', {
+    is: 'mtn_sms',
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+  MTN_SMS_BASE_URL: Joi.string()
+    .uri()
+    .when('SMS_PROVIDER', {
+      is: 'mtn_sms',
+      then: Joi.string().uri().required(),
+      otherwise: Joi.string().uri().allow('').optional(),
+    }),
+  MTN_SMS_SENDER_ID: Joi.string().when('SMS_PROVIDER', {
+    is: 'mtn_sms',
+    then: Joi.string().required(),
+    otherwise: Joi.string().allow('').optional(),
+  }),
+
+  SMS_PROVIDER: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('mtn_sms').default('mtn_sms'),
+    otherwise: Joi.string()
+      .valid('mtn_sms', 'africastalking')
+      .default('africastalking'),
+  }),
   AFRICASTALKING_USERNAME: Joi.string().allow('').optional(),
   AFRICASTALKING_APP: Joi.string().allow('').optional(),
   AFRICASTALKING_API_KEY: Joi.string().allow('').optional(),
@@ -182,6 +229,7 @@ export const validationSchema = Joi.object({
 
   // Firebase
   FIREBASE_PROJECT_ID: Joi.string().allow('').optional(),
+  FIREBASE_CLIENT_EMAIL: Joi.string().allow('').optional(),
   FIREBASE_CLIENT_ESMTP: Joi.string().allow('').optional(),
   FIREBASE_PRIVATE_KEY: Joi.string().allow('').optional(),
 
@@ -196,11 +244,11 @@ export const validationSchema = Joi.object({
     .default(true),
 
   // Provisioning provider adapter
+  BULK_DATA_API_BASE_URL: Joi.string().uri().allow('').optional(),
+  BULK_DATA_API_TIMEOUT_MS: Joi.number().min(1000).default(15000),
   PROVISIONING_PROVIDER: Joi.string().valid('pcrf').default('pcrf'),
   PROVISIONING_PCRF_BASE_URL: Joi.string().uri().allow('').optional(),
   PROVISIONING_PCRF_TIMEOUT_MS: Joi.number().min(1000).default(15000),
-  PROVISIONING_PCRF_BEARER_TOKEN: Joi.string().allow('').optional(),
-  PROVISIONING_PCRF_API_KEY: Joi.string().allow('').optional(),
   PROVISIONING_PCRF_GROUP_MEMBER_PATH: Joi.string().default(
     '/api/pcrf/group-member',
   ),
@@ -217,20 +265,6 @@ export const validationSchema = Joi.object({
     '/api/pcrf/subscriber',
   ),
   PROVISIONING_PCRF_SUBSCRIBE_PATH: Joi.string().default('/api/pcrf/subscribe'),
-  PROVISIONING_PCRF_SUBSCRIBE_URL: Joi.string().uri().allow('').optional(),
-
-  // Backward-compatible aliases for existing deployment environments.
-  PCRF_BASE_URL: Joi.string().uri().allow('').optional(),
-  PCRF_TIMEOUT_MS: Joi.number().min(1000).optional(),
-  PCRF_BEARER_TOKEN: Joi.string().allow('').optional(),
-  PCRF_API_KEY: Joi.string().allow('').optional(),
-  PCRF_GROUP_MEMBER_PATH: Joi.string().optional(),
-  PCRF_GROUP_MEMBERS_BULK_PATH: Joi.string().optional(),
-  PCRF_GROUP_MEMBER_DELETE_PATH: Joi.string().optional(),
-  PCRF_SUBSCRIPTIONS_UPDATE_PATH: Joi.string().optional(),
-  PCRF_SUBSCRIBER_PATH: Joi.string().optional(),
-  PCRF_SUBSCRIBE_PATH: Joi.string().optional(),
-  PCRF_SUBSCRIBE_URL: Joi.string().uri().allow('').optional(),
 
   // Payment provider
   SIMULATE_PAYMENT_STATUS_UPDATES: Joi.boolean()
@@ -238,38 +272,31 @@ export const validationSchema = Joi.object({
     .falsy('false')
     .default(false),
   PAYMENT_PROVIDER_INIT_URL: Joi.string().uri().allow('').optional(),
-  PAYMENT_PROVIDER_API_KEY: Joi.string().allow('').optional(),
-  PAYMENT_PROVIDER_BEARER_TOKEN: Joi.string().allow('').optional(),
+  PAYMENT_CARD_PROVIDER_INIT_PATH: Joi.string().allow('').optional(),
   PAYMENT_PROVIDER_TIMEOUT_MS: Joi.number().min(1000).default(15000),
   PAYMENT_PRN_PROVIDER_INIT_URL: Joi.string().uri().allow('').optional(),
-  PAYMENT_PRN_PROVIDER_API_KEY: Joi.string().allow('').optional(),
-  PAYMENT_PRN_PROVIDER_BEARER_TOKEN: Joi.string().allow('').optional(),
+  PAYMENT_PRN_REFERENCE_PATH: Joi.string().default('/api/payment/reference'),
   PAYMENT_PRN_PROVIDER_TIMEOUT_MS: Joi.number().min(1000).optional(),
   PAYMENT_MOMO_PROVIDER_MODE: Joi.string()
     .valid('provider', 'sptransfer', 'sp_transfer')
     .default('provider'),
   PAYMENT_MOMO_PROVIDER_INIT_URL: Joi.string().uri().allow('').optional(),
-  PAYMENT_MOMO_PROVIDER_API_KEY: Joi.string().allow('').optional(),
-  PAYMENT_MOMO_PROVIDER_BEARER_TOKEN: Joi.string().allow('').optional(),
   PAYMENT_MOMO_PROVIDER_TIMEOUT_MS: Joi.number().min(1000).optional(),
+  PAYMENT_MOMO_ECW_URL: Joi.string().uri().allow('').optional(),
   PAYMENT_MOMO_SPTRANSFER_URL: Joi.string().uri().allow('').optional(),
   PAYMENT_MOMO_SPTRANSFER_BASE_URL: Joi.string().uri().allow('').optional(),
   PAYMENT_MOMO_SPTRANSFER_PATH: Joi.string().default('/sptransfer/'),
-  PAYMENT_MOMO_SPTRANSFER_FROM_FRI: Joi.string().allow('').optional(),
   PAYMENT_MOMO_SPTRANSFER_TO_FRI: Joi.string().allow('').optional(),
-  PAYMENT_MOMO_SPTRANSFER_USERNAME: Joi.string().allow('').optional(),
-  PAYMENT_MOMO_SPTRANSFER_PASSWORD: Joi.string().allow('').optional(),
   PAYMENT_AIRTIME_PROVIDER_INIT_URL: Joi.string().uri().allow('').optional(),
   PAYMENT_AIRTIME_UPDATE_BALANCE_PATH: Joi.string().default(
     '/api/update-balance-and-date',
   ),
-  PAYMENT_AIRTIME_PROVIDER_API_KEY: Joi.string().allow('').optional(),
-  PAYMENT_AIRTIME_PROVIDER_BEARER_TOKEN: Joi.string().allow('').optional(),
   PAYMENT_AIRTIME_PROVIDER_TIMEOUT_MS: Joi.number().min(1000).optional(),
   PAYMENT_CALLBACK_BASE_URL: Joi.string().uri().allow('').optional(),
 
   // Security
   SECURITY_AUDIT_LOG_ENABLED: Joi.boolean().truthy('true').falsy('false'),
+  SECURITY_ALERT_EMAIL_ENABLED: Joi.boolean().truthy('true').falsy('false'),
   SECURITY_ALERT_ESMTP_ENABLED: Joi.boolean().truthy('true').falsy('false'),
   SECURITY_ALERT_SMS_ENABLED: Joi.boolean().truthy('true').falsy('false'),
 

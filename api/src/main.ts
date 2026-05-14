@@ -53,7 +53,16 @@ async function bootstrap() {
     // Security
     await app.register(helmet, { crossOriginResourcePolicy: false });
 
-    await app.register(rateLimit, { max: 100, timeWindow: '15 minutes' });
+    await app.register(rateLimit, {
+      max: 100,
+      timeWindow: '15 minutes',
+      errorResponseBuilder: (_request, context) => ({
+        statusCode: context.statusCode,
+        error:
+          context.statusCode === 429 ? 'Too Many Requests' : 'Forbidden',
+        message: `Rate limit exceeded, retry in ${context.after}`,
+      }),
+    });
 
     // Cookies & multipart
     await app.register(cookie, {

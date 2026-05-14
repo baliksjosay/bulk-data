@@ -71,10 +71,10 @@ export class EmailOtpMfaProvider implements MfaProvider {
       expiresAt,
       isUsed: false,
       payload: {
+        ...context,
         method: this.method,
         otpHash,
         email: user.email,
-        ...context,
       },
     });
 
@@ -83,6 +83,7 @@ export class EmailOtpMfaProvider implements MfaProvider {
     await this.authNotificationService.sendEmailOtpMfaRequested({
       userId: user.id,
       email: user.email,
+      challengeId: saved.id,
       otp,
       expiresAt,
     });

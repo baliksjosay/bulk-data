@@ -18,28 +18,46 @@ export class LoggingInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
-    const { method, url, body } = request;
+    const { method, url } = request;
     const now = Date.now();
 
     this.logger.log(
-      `Incoming Request: ${method} ${url} - Body: ${JSON.stringify(body)}`,
+      JSON.stringify({
+        event: 'http_request_received',
+        method,
+        url,
+      }),
     );
 
     return next.handle().pipe(
       tap({
-        next: (data) => {
+        next: () => {
           const response = context.switchToHttp().getResponse();
           const { statusCode } = response;
           const delay = Date.now() - now;
 
           this.logger.log(
-            `Outgoing Response: ${method} ${url} ${statusCode} - ${delay}ms`,
+            JSON.stringify({
+              event: 'http_request_completed',
+              method,
+              url,
+              statusCode,
+              durationMs: delay,
+            }),
           );
         },
         error: (error) => {
           const delay = Date.now() - now;
           this.logger.error(
-            `Request Failed: ${method} ${url} - ${error.message} - ${delay}ms`,
+            JSON.stringify({
+              event: 'http_request_failed',
+              method,
+              url,
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+              message:
+                error instanceof Error ? error.message : 'Request failed',
+              durationMs: delay,
+            }),
           );
         },
       }),

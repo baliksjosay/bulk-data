@@ -1,9 +1,9 @@
-import { Injectable } from "@nestjs/common";
-import { User } from "src/modules/users/entities/user.entity";
+import { Injectable } from '@nestjs/common';
+import { User } from 'src/modules/users/entities/user.entity';
 
 @Injectable()
 export class AuthPolicyService {
-  determineAllowedMethods(user: User, context: Record<string, any>) {
+  determineAllowedMethods(user: User) {
     return {
       allowPassword: true,
       allowGoogle: true,

@@ -41,4 +41,14 @@ export class OtpLoginDto {
   @IsString()
   @MaxLength(255)
   deviceId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'OTP challenge identifier returned by the OTP request endpoint.',
+    example: '2f0dce94-9e01-4cb4-a5ab-840d3447d6f0',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  challengeId?: string;
 }

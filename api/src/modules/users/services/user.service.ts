@@ -22,6 +22,7 @@ import { UserPreferenceRepository } from '../repositories/user-preference.reposi
 import { RedisService } from '../../redis/redis.service';
 import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.interface';
 import { InitialAdminSeedService } from './initial-admin-seed.service';
+import { PasswordPolicyService } from './password-policy.service';
 
 type DemoUserSeed = {
   firstName: string;
@@ -37,9 +38,17 @@ type ManagedStaffRole = UserRole.ADMIN | UserRole.SUPPORT;
 
 type NormalizedCreateStaffUser = {
   email: string;
-  phoneNumber: string;
-  lanId: string;
+  phoneNumber?: string;
+  lanId?: string;
   role: ManagedStaffRole;
+};
+
+type CustomerPortalUserInput = {
+  businessName: string;
+  contactPerson: string;
+  email: string;
+  phoneNumber: string;
+  createdBy?: string;
 };
 
 const STAFF_CREATORS = [UserRole.SUPER_ADMIN, UserRole.ADMIN] as const;
@@ -59,6 +68,7 @@ export class UserService implements OnModuleInit {
     private readonly preferenceRepository: UserPreferenceRepository,
     private readonly redis: RedisService,
     private readonly initialAdminSeedService: InitialAdminSeedService,
+    private readonly passwordPolicyService: PasswordPolicyService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -231,17 +241,126 @@ export class UserService implements OnModuleInit {
       firstName: names.firstName,
       lastName: names.lastName,
       email: normalized.email,
-      phoneNumber: normalized.phoneNumber,
+      phoneNumber: normalized.phoneNumber ?? null,
       authProvider: AuthProvider.AD,
-      externalId: normalized.lanId,
+      externalId: normalized.lanId ?? null,
       roles: [normalized.role],
       status: UserStatus.ACTIVE,
       createdBy: actor.id,
       emailVerified: true,
-      phoneVerified: true,
+      phoneVerified: Boolean(normalized.phoneNumber),
       isLocked: false,
       failedLoginAttempts: 0,
       mfaEnabled: true,
+      mfaVerified: false,
+      preferences: this.preferenceRepository.createDefault(),
+    });
+
+    const saved = await this.userRepository.save(user);
+    await this.invalidateUserCaches(saved);
+    return this.requireById(saved.id);
+  }
+
+  async createOrUpdateCustomerPortalUser(
+    input: CustomerPortalUserInput,
+  ): Promise<User> {
+    const email = input.email.trim().toLowerCase();
+    const phoneNumber = this.normalizePhoneNumber(input.phoneNumber);
+    const existingByEmail = await this.userRepository.findByEmail(email);
+    const existingByPhone =
+      await this.userRepository.findByPhoneNumber(phoneNumber);
+
+    if (existingByEmail && !existingByEmail.roles.includes(UserRole.CUSTOMER)) {
+      throw new ConflictException(
+        'Customer contact email is already linked to another user type',
+      );
+    }
+
+    if (
+      existingByPhone &&
+      existingByPhone.id !== existingByEmail?.id &&
+      !existingByPhone.roles.includes(UserRole.CUSTOMER)
+    ) {
+      throw new ConflictException(
+        'Customer contact phone is already linked to another user type',
+      );
+    }
+
+    if (
+      existingByPhone &&
+      existingByEmail &&
+      existingByPhone.id !== existingByEmail.id
+    ) {
+      throw new ConflictException(
+        'Customer contact email and phone belong to different users',
+      );
+    }
+
+    const existing = existingByEmail ?? existingByPhone;
+    const names = this.deriveCustomerNames(
+      input.contactPerson,
+      input.businessName,
+      email,
+    );
+
+    if (existing) {
+      const oldEmail = existing.email;
+      const oldPhone = existing.phoneNumber;
+      const oldExternalId = existing.externalId;
+      const oldProvider = existing.authProvider;
+
+      existing.firstName = names.firstName;
+      existing.lastName = names.lastName;
+      existing.email = email;
+      existing.phoneNumber = phoneNumber;
+      existing.authProvider = AuthProvider.LOCAL;
+      existing.externalId = null;
+      existing.roles = this.normalizeRoles([
+        ...existing.roles,
+        UserRole.CUSTOMER,
+      ]);
+      existing.status =
+        existing.status === UserStatus.ACTIVE
+          ? UserStatus.ACTIVE
+          : UserStatus.PENDING;
+      existing.emailVerified =
+        existing.status === UserStatus.ACTIVE && oldEmail === email
+          ? existing.emailVerified
+          : false;
+      existing.phoneVerified =
+        existing.status === UserStatus.ACTIVE && oldPhone === phoneNumber
+          ? existing.phoneVerified
+          : false;
+      existing.isLocked = false;
+      existing.lockedUntil = null;
+      existing.failedLoginAttempts = 0;
+      existing.mfaEnabled = false;
+
+      await this.userRepository.save(existing);
+      await this.invalidateUserCaches(existing, {
+        oldEmail,
+        oldPhone,
+        oldExternalId,
+        oldProvider,
+      });
+      return this.requireById(existing.id);
+    }
+
+    const user = this.userRepository.create({
+      firstName: names.firstName,
+      lastName: names.lastName,
+      email,
+      phoneNumber,
+      authProvider: AuthProvider.LOCAL,
+      externalId: null,
+      roles: [UserRole.CUSTOMER],
+      status: UserStatus.PENDING,
+      createdBy: input.createdBy ?? null,
+      emailVerified: false,
+      phoneVerified: false,
+      isLocked: false,
+      failedLoginAttempts: 0,
+      mfaEnabled: false,
       mfaVerified: false,
       preferences: this.preferenceRepository.createDefault(),
     });
@@ -472,6 +591,8 @@ export class UserService implements OnModuleInit {
     profile: {
       username?: string;
       displayName?: string;
+      firstName?: string;
+      lastName?: string;
       phoneNumber?: string;
       emailAddress?: string;
     },
@@ -482,7 +603,18 @@ export class UserService implements OnModuleInit {
     const oldExternalId = user.externalId;
     const oldProvider = user.authProvider;
 
-    const displayName = profile.displayName?.trim();
+    const firstName = profile.firstName?.trim();
+    const lastName = profile.lastName?.trim();
+
+    if (firstName) {
+      user.firstName = firstName;
+    }
+
+    if (lastName) {
+      user.lastName = lastName;
+    }
+
+    const displayName = !firstName && !lastName && profile.displayName?.trim();
     if (displayName) {
       const [firstName, ...lastNameParts] = displayName.split(/\s+/);
       user.firstName = firstName || user.firstName;
@@ -490,27 +622,38 @@ export class UserService implements OnModuleInit {
     }
 
     const normalizedEmail = profile.emailAddress?.trim().toLowerCase();
-    if (normalizedEmail && normalizedEmail !== user.email) {
-      const existing = await this.userRepository.findByEmail(normalizedEmail);
-      if (existing && existing.id !== user.id) {
-        throw new ConflictException(
-          'Active Directory email is already linked to another user',
-        );
+    if (normalizedEmail) {
+      if (normalizedEmail === user.email) {
+        user.emailVerified = true;
+      } else {
+        const existing = await this.userRepository.findByEmail(normalizedEmail);
+        if (existing && existing.id !== user.id) {
+          throw new ConflictException(
+            'Active Directory email is already linked to another user',
+          );
+        }
+        user.email = normalizedEmail;
+        user.emailVerified = true;
       }
-      user.email = normalizedEmail;
-      user.emailVerified = true;
     }
 
-    const phoneNumber = profile.phoneNumber?.trim();
-    if (phoneNumber && phoneNumber !== user.phoneNumber) {
-      const existing = await this.userRepository.findByPhoneNumber(phoneNumber);
-      if (existing && existing.id !== user.id) {
-        throw new ConflictException(
-          'Active Directory phone number is already linked to another user',
-        );
+    const phoneNumber = profile.phoneNumber
+      ? this.normalizePhoneNumber(profile.phoneNumber)
+      : undefined;
+    if (phoneNumber) {
+      if (phoneNumber === user.phoneNumber) {
+        user.phoneVerified = true;
+      } else {
+        const existing =
+          await this.userRepository.findByPhoneNumber(phoneNumber);
+        if (existing && existing.id !== user.id) {
+          throw new ConflictException(
+            'Active Directory phone number is already linked to another user',
+          );
+        }
+        user.phoneNumber = phoneNumber;
+        user.phoneVerified = true;
       }
-      user.phoneNumber = phoneNumber;
-      user.phoneVerified = true;
     }
 
     const username = profile.username?.trim().toLowerCase();
@@ -523,6 +666,8 @@ export class UserService implements OnModuleInit {
       }
       user.externalId = username;
     }
+
+    user.authProvider = AuthProvider.AD;
 
     await this.userRepository.save(user);
     await this.invalidateUserCaches(user, {
@@ -547,6 +692,28 @@ export class UserService implements OnModuleInit {
 
   async findAllForActor(actor: AuthenticatedUser, query: UserQueryDto) {
     return this.findAll(this.scopeQueryForActor(actor, query));
+  }
+
+  async findStaffForActor(actor: AuthenticatedUser, query: UserQueryDto) {
+    this.ensureActorCanViewStaffUsers(actor);
+    const scopedQuery = this.scopeQueryForActor(actor, query);
+
+    if (
+      scopedQuery.role &&
+      !MANAGED_STAFF_ROLES.includes(scopedQuery.role as ManagedStaffRole)
+    ) {
+      throw new BadRequestException(
+        'Staff role filter must be ADMIN or SUPPORT',
+      );
+    }
+
+    const cacheKey = this.getStaffUserListCacheKey(scopedQuery);
+    const cached = await this.redis.get<any>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.userRepository.findStaffUsers(scopedQuery);
+    await this.redis.set(cacheKey, result, this.USER_LIST_CACHE_TTL);
+    return result;
   }
 
   async getMe(userId: string): Promise<User> {
@@ -709,6 +876,13 @@ export class UserService implements OnModuleInit {
 
   async setPassword(userId: string, password: string): Promise<void> {
     const user = await this.requireById(userId);
+    if (this.isCustomerLocalAccount(user)) {
+      await this.passwordPolicyService.validateCustomerPassword(
+        user.id,
+        password,
+      );
+    }
+
     user.password = await this.hashPassword(password);
 
     if (user.authProvider !== AuthProvider.LOCAL) {
@@ -716,6 +890,12 @@ export class UserService implements OnModuleInit {
     }
 
     await this.userRepository.save(user);
+    if (this.isCustomerLocalAccount(user)) {
+      await this.passwordPolicyService.recordPasswordChange(
+        user.id,
+        user.password,
+      );
+    }
     await this.invalidateUserCaches(user);
   }
 
@@ -741,8 +921,22 @@ export class UserService implements OnModuleInit {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
+    if (this.isCustomerLocalAccount(user)) {
+      await this.passwordPolicyService.validateCustomerPassword(
+        user.id,
+        newPassword,
+        { enforceMinAge: true },
+      );
+    }
+
     user.password = await this.hashPassword(newPassword);
     await this.userRepository.save(user);
+    if (this.isCustomerLocalAccount(user)) {
+      await this.passwordPolicyService.recordPasswordChange(
+        user.id,
+        user.password,
+      );
+    }
     await this.invalidateUserCaches(user);
   }
 
@@ -853,7 +1047,12 @@ export class UserService implements OnModuleInit {
       redisAttempts,
     );
 
-    if (user.failedLoginAttempts >= this.MAX_FAILED_LOGIN_ATTEMPTS) {
+    const policy = await this.passwordPolicyService.getEffectivePolicy();
+    const lockoutThreshold = this.isCustomerLocalAccount(user)
+      ? policy.accountLockoutThreshold
+      : this.MAX_FAILED_LOGIN_ATTEMPTS;
+
+    if (user.failedLoginAttempts >= lockoutThreshold) {
       user.isLocked = true;
       user.status = UserStatus.LOCKED;
       user.lockedUntil = new Date(
@@ -878,6 +1077,24 @@ export class UserService implements OnModuleInit {
 
   async findExpiredLockedUsers(): Promise<User[]> {
     return this.userRepository.findExpiredLockedUsers();
+  }
+
+  async lockDormantCustomerLocalAccounts(cutoff: Date): Promise<number> {
+    const users =
+      await this.userRepository.findDormantCustomerLocalUsers(cutoff);
+
+    for (const user of users) {
+      user.isLocked = true;
+      user.status = UserStatus.LOCKED;
+      user.lockedUntil = null;
+      user.failedLoginAttempts = 0;
+      await this.userRepository.save(user);
+      await this.redis.del(this.getUserFailedAttemptsKey(user.id));
+      await this.redis.del(this.getUserLockCacheKey(user.id));
+      await this.invalidateUserCaches(user);
+    }
+
+    return users.length;
   }
 
   async resetFailedLoginAttempts(userId: string): Promise<void> {
@@ -1062,19 +1279,36 @@ export class UserService implements OnModuleInit {
     }
   }
 
+  private ensureActorCanViewStaffUsers(actor: AuthenticatedUser): void {
+    const canViewStaff = actor.roles.some((role) =>
+      [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT].includes(
+        role as UserRole,
+      ),
+    );
+
+    if (!canViewStaff) {
+      throw new ForbiddenException('Only staff users can view staff accounts');
+    }
+  }
+
   private normalizeCreateStaffUser(
     dto: CreateStaffUserDto,
   ): NormalizedCreateStaffUser {
-    const role = dto.role as ManagedStaffRole;
+    const role = (dto.role ?? UserRole.SUPPORT) as ManagedStaffRole;
 
     if (!MANAGED_STAFF_ROLES.includes(role)) {
       throw new BadRequestException('Staff user role must be ADMIN or SUPPORT');
     }
 
+    const phoneNumber = dto.phoneNumber
+      ? this.normalizePhoneNumber(dto.phoneNumber)
+      : undefined;
+    const lanId = dto.lanId?.trim().toLowerCase() || undefined;
+
     return {
       email: dto.email.trim().toLowerCase(),
-      phoneNumber: this.normalizePhoneNumber(dto.phoneNumber),
-      lanId: dto.lanId.trim().toLowerCase(),
+      ...(phoneNumber ? { phoneNumber } : {}),
+      ...(lanId ? { lanId } : {}),
       role,
     };
   }
@@ -1086,12 +1320,18 @@ export class UserService implements OnModuleInit {
       throw new ConflictException('Email address is already in use');
     }
 
-    if (await this.userRepository.existsByPhoneNumber(dto.phoneNumber)) {
+    if (
+      dto.phoneNumber &&
+      (await this.userRepository.existsByPhoneNumber(dto.phoneNumber))
+    ) {
       throw new ConflictException('Phone number is already in use');
     }
 
-    if (await this.userRepository.existsByExternalId(dto.lanId)) {
-      throw new ConflictException('LAN ID is already in use');
+    if (
+      dto.lanId &&
+      (await this.userRepository.existsByExternalId(dto.lanId))
+    ) {
+      throw new ConflictException('AD username is already in use');
     }
   }
 
@@ -1120,9 +1360,10 @@ export class UserService implements OnModuleInit {
 
   private deriveStaffNames(
     email: string,
-    lanId: string,
+    lanId?: string,
   ): { firstName: string; lastName?: string | null } {
-    const localPart = email.split('@')[0]?.trim() || lanId;
+    const fallback = lanId || 'staff';
+    const localPart = email.split('@')[0]?.trim() || fallback;
     const parts = localPart
       .replace(/[._-]+/g, ' ')
       .split(' ')
@@ -1130,7 +1371,32 @@ export class UserService implements OnModuleInit {
       .filter(Boolean);
 
     return {
-      firstName: this.toDisplayNamePart(parts[0] ?? lanId),
+      firstName: this.toDisplayNamePart(parts[0] ?? fallback),
+      lastName:
+        parts.length > 1
+          ? parts
+              .slice(1)
+              .map((part) => this.toDisplayNamePart(part))
+              .join(' ')
+          : null,
+    };
+  }
+
+  private deriveCustomerNames(
+    contactPerson: string,
+    businessName: string,
+    email: string,
+  ): { firstName: string; lastName?: string | null } {
+    const source =
+      contactPerson.trim() || businessName.trim() || email.split('@')[0] || '';
+    const parts = source
+      .replace(/[._-]+/g, ' ')
+      .split(/\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    return {
+      firstName: this.toDisplayNamePart(parts[0] ?? 'Customer'),
       lastName:
         parts.length > 1
           ? parts
@@ -1184,6 +1450,13 @@ export class UserService implements OnModuleInit {
       throw new BadRequestException('At least one role is required');
     }
     return normalized;
+  }
+
+  private isCustomerLocalAccount(user: Pick<User, 'authProvider' | 'roles'>) {
+    return (
+      user.authProvider === AuthProvider.LOCAL &&
+      user.roles.includes(UserRole.CUSTOMER)
+    );
   }
 
   private async hashPassword(password: string): Promise<string> {
@@ -1245,6 +1518,10 @@ export class UserService implements OnModuleInit {
 
   private getUserListCacheKey(query: UserQueryDto): string {
     return `user:list:${Buffer.from(JSON.stringify(query)).toString('base64')}`;
+  }
+
+  private getStaffUserListCacheKey(query: UserQueryDto): string {
+    return `user:staff:list:${Buffer.from(JSON.stringify(query)).toString('base64')}`;
   }
 
   private getUserFailedAttemptsKey(userId: string): string {
@@ -1316,5 +1593,6 @@ export class UserService implements OnModuleInit {
 
     await this.redis.mdel([...keys]);
     await this.redis.delByPattern('user:list:*');
+    await this.redis.delByPattern('user:staff:list:*');
   }
 }

@@ -1,4 +1,3 @@
-
 /**
  * Enumerates supported authentication entry methods.
  */

@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, LessThanOrEqual, Repository } from 'typeorm';
+import { Brackets, LessThanOrEqual, Repository, SelectQueryBuilder } from 'typeorm';
 import { User } from '../entities/user.entity';
 import { AuthProvider } from '../enums/auth-provider.enum';
 import { UserQueryDto } from '../dto/user-query.dto';
 import { UserStatus } from '../enums/user-status.enum';
+import { UserRole } from '../enums/user-role.enum';
 
 @Injectable()
 export class UserRepository {
@@ -143,48 +144,63 @@ export class UserRepository {
       .skip(skip)
       .take(limit);
 
-    if (query.status) {
-      qb.andWhere('user.status = :status', { status: query.status });
-    }
-
-    if (query.authProvider) {
-      qb.andWhere('user.authProvider = :authProvider', {
-        authProvider: query.authProvider,
-      });
-    }
-
-    if (query.role) {
-      qb.andWhere(':role = ANY(user.roles)', { role: query.role });
-    }
-
-    if (query.search) {
-      qb.andWhere(
-        new Brackets((subQb) => {
-          subQb
-            .where('LOWER(user.firstName) LIKE LOWER(:search)', {
-              search: `%${query.search}%`,
-            })
-            .orWhere('LOWER(user.lastName) LIKE LOWER(:search)', {
-              search: `%${query.search}%`,
-            })
-            .orWhere('LOWER(user.email) LIKE LOWER(:search)', {
-              search: `%${query.search}%`,
-            })
-            .orWhere('LOWER(user.phoneNumber) LIKE LOWER(:search)', {
-              search: `%${query.search}%`,
-            });
-        }),
-      );
-    }
+    this.applyUserListFilters(qb, query);
 
     const [data, total] = await qb.getManyAndCount();
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
 
     return {
       data,
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    };
+  }
+
+  async findStaffUsers(query: UserQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const qb = this.repo
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.preferences', 'preferences')
+      .orderBy('user.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    if (query.role) {
+      qb.andWhere(':role = ANY(user.roles)', { role: query.role });
+    } else {
+      qb.andWhere(
+        new Brackets((subQb) => {
+          subQb
+            .where(':adminRole = ANY(user.roles)', {
+              adminRole: UserRole.ADMIN,
+            })
+            .orWhere(':supportRole = ANY(user.roles)', {
+              supportRole: UserRole.SUPPORT,
+            });
+        }),
+      );
+    }
+
+    this.applyUserListFilters(qb, query, { includeRole: false });
+
+    const [data, total] = await qb.getManyAndCount();
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
     };
   }
 
@@ -209,5 +225,73 @@ export class UserRepository {
         lockedUntil: LessThanOrEqual(new Date()),
       },
     });
+  }
+
+  async findDormantCustomerLocalUsers(cutoff: Date): Promise<User[]> {
+    return this.repo
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.preferences', 'preferences')
+      .where(':customerRole = ANY(user.roles)', {
+        customerRole: UserRole.CUSTOMER,
+      })
+      .andWhere('user.authProvider = :authProvider', {
+        authProvider: AuthProvider.LOCAL,
+      })
+      .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
+      .andWhere('user.isLocked = false')
+      .andWhere(
+        new Brackets((qb) => {
+          qb.where('user.lastLoginAt <= :cutoff', { cutoff }).orWhere(
+            'user.lastLoginAt IS NULL AND user.createdAt <= :cutoff',
+            { cutoff },
+          );
+        }),
+      )
+      .getMany();
+  }
+
+  private applyUserListFilters(
+    qb: SelectQueryBuilder<User>,
+    query: UserQueryDto,
+    options: { includeRole?: boolean } = {},
+  ): void {
+    const includeRole = options.includeRole ?? true;
+
+    if (query.status) {
+      qb.andWhere('user.status = :status', { status: query.status });
+    }
+
+    if (query.authProvider) {
+      qb.andWhere('user.authProvider = :authProvider', {
+        authProvider: query.authProvider,
+      });
+    }
+
+    if (includeRole && query.role) {
+      qb.andWhere(':role = ANY(user.roles)', { role: query.role });
+    }
+
+    if (query.search) {
+      qb.andWhere(
+        new Brackets((subQb) => {
+          subQb
+            .where('LOWER(user.firstName) LIKE LOWER(:search)', {
+              search: `%${query.search}%`,
+            })
+            .orWhere('LOWER(user.lastName) LIKE LOWER(:search)', {
+              search: `%${query.search}%`,
+            })
+            .orWhere('LOWER(user.email) LIKE LOWER(:search)', {
+              search: `%${query.search}%`,
+            })
+            .orWhere('LOWER(user.phoneNumber) LIKE LOWER(:search)', {
+              search: `%${query.search}%`,
+            })
+            .orWhere('LOWER(user.externalId) LIKE LOWER(:search)', {
+              search: `%${query.search}%`,
+            });
+        }),
+      );
+    }
   }
 }

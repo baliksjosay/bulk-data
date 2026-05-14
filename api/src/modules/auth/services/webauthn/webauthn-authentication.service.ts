@@ -291,7 +291,10 @@ export class WebauthnAuthenticationService {
     }
 
     return [
-      this.configService.get<string>('webauthn.origin', 'http://localhost:3000'),
+      this.configService.get<string>(
+        'webauthn.origin',
+        'http://localhost:3000',
+      ),
     ];
   }
 

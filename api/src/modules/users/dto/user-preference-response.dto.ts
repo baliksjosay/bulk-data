@@ -65,4 +65,18 @@ export class UserPreferenceResponseDto {
     example: 'light',
   })
   theme: string;
+
+  @Expose()
+  @ApiProperty({
+    description:
+      'Additional dashboard and notification delivery preferences such as quiet hours.',
+    example: {
+      defaultLanding: 'overview',
+      dataDensity: 'comfortable',
+      quietHours: { enabled: true, start: '20:00', end: '07:00' },
+      smsNotifications: true,
+      whatsappNotifications: false,
+    },
+  })
+  dashboardPreferences?: Record<string, unknown> | null;
 }

@@ -71,10 +71,10 @@ export class SmsOtpMfaProvider implements MfaProvider {
       expiresAt,
       isUsed: false,
       payload: {
+        ...context,
         method: this.method,
         otpHash,
         phoneNumber: user.phoneNumber,
-        ...context,
       },
     });
 
@@ -83,8 +83,10 @@ export class SmsOtpMfaProvider implements MfaProvider {
     await this.authNotificationService.sendPhoneVerificationRequested({
       userId: user.id,
       phoneNumber: user.phoneNumber,
+      challengeId: saved.id,
       otp,
       expiresAt,
+      purpose: 'mfa_sms_otp',
     });
 
     return {

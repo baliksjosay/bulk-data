@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +24,12 @@ import { Repository } from 'typeorm';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { UserService } from 'src/modules/users/services/user.service';
 import { Roles } from 'src/common/decorators/roles.decorator';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import {
+  PasswordPolicyResponseDto,
+  UpdatePasswordPolicyDto,
+} from 'src/modules/users/dto/password-policy.dto';
+import { PasswordPolicyService } from 'src/modules/users/services/password-policy.service';
 
 /**
  * Exposes security and audit operations for privileged users.
@@ -33,6 +41,7 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 export class SecurityController {
   constructor(
     private readonly usersService: UserService,
+    private readonly passwordPolicyService: PasswordPolicyService,
     @InjectRepository(SecurityAuditLog)
     private readonly securityAuditLogRepo: Repository<SecurityAuditLog>,
   ) {}
@@ -50,6 +59,39 @@ export class SecurityController {
       order: { createdAt: 'DESC' },
       take: 100,
     });
+  }
+
+  @Get('password-policy')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT)
+  @ApiOperation({
+    summary: 'Get customer-local password policy',
+    description:
+      'Returns the policy applied only to customer local-password activation and password changes. Internal users keep their Active Directory password flow.',
+  })
+  @ApiOkResponse({
+    description: 'Password policy retrieved successfully.',
+    type: PasswordPolicyResponseDto,
+  })
+  async getPasswordPolicy(): Promise<PasswordPolicyResponseDto> {
+    return this.passwordPolicyService.getEffectivePolicy();
+  }
+
+  @Patch('password-policy')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Update customer-local password policy',
+    description:
+      'Updates the customer-local password policy without changing internal Active Directory authentication.',
+  })
+  @ApiOkResponse({
+    description: 'Password policy updated successfully.',
+    type: PasswordPolicyResponseDto,
+  })
+  async updatePasswordPolicy(
+    @Body() dto: UpdatePasswordPolicyDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<PasswordPolicyResponseDto> {
+    return this.passwordPolicyService.updatePolicy(dto, userId);
   }
 
   @Post('unlock/:userId')

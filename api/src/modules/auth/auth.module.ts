@@ -114,6 +114,12 @@ import { LocalActiveDirectoryService } from './services/active-directory.service
 
     AuthNotificationService,
   ],
-  exports: [AuthService, TokenService, MfaService, SecurityAuditService],
+  exports: [
+    AuthService,
+    TokenService,
+    MfaService,
+    SecurityAuditService,
+    ActivationService,
+  ],
 })
 export class AuthModule {}

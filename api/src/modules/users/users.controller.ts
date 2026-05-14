@@ -30,14 +30,15 @@ import { AuthenticatedUser } from 'src/common/interfaces/authenticated-user.inte
 import { UserService } from './services/user.service';
 import { UserRole } from './enums/user-role.enum';
 import { Roles } from 'src/common/decorators/roles.decorator';
-import { PaginatedUserResponseDto, UserResponseDto } from './dto/user-response.dto';
+import {
+  PaginatedUserResponseDto,
+  UserResponseDto,
+} from './dto/user-response.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserStatus } from './enums/user-status.enum';
 import { toDtos } from 'src/common/utils/toDto';
-
-
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -46,19 +47,17 @@ export class UsersController {
   constructor(private readonly userService: UserService) {}
 
   @Post()
-  @Roles(UserRole.SUPER_ADMIN,UserRole.ADMIN, UserRole.SUPPORT)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT)
   @ApiOperation({
     summary: 'Create user',
-    description:
-      'Creates a new user.',
+    description: 'Creates a new user.',
   })
   @ApiCreatedResponse({
     description: 'User created successfully.',
     type: UserResponseDto,
   })
   @ApiForbiddenResponse({
-    description:
-      'You are not allowed to create a user for the requested.',
+    description: 'You are not allowed to create a user for the requested.',
   })
   @ApiUnauthorizedResponse({
     description: 'Unauthorized.',
@@ -77,8 +76,7 @@ export class UsersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT)
   @ApiOperation({
     summary: 'List users',
-    description:
-      'Returns a paginated list of users.',
+    description: 'Returns a paginated list of users.',
   })
   @ApiOkResponse({
     description: 'Users retrieved successfully.',
@@ -94,12 +92,14 @@ export class UsersController {
     const result = await this.userService.findAllForActor(actor, query);
 
     return {
-      data:toDtos(UserResponseDto, result.data),
+      data: toDtos(UserResponseDto, result.data),
       meta: {
         page: result.page,
         limit: result.limit,
         total: result.total,
         totalPages: result.totalPages,
+        hasNextPage: result.hasNextPage,
+        hasPreviousPage: result.hasPreviousPage,
       },
     };
   }
@@ -149,8 +149,7 @@ export class UsersController {
   @Get(':id')
   @ApiOperation({
     summary: 'Get user by id',
-    description:
-      'Returns a user by identifier.',
+    description: 'Returns a user by identifier.',
   })
   @ApiParam({
     name: 'id',
@@ -181,8 +180,7 @@ export class UsersController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPPORT)
   @ApiOperation({
     summary: 'Update user',
-    description:
-      'Updates a user by id.',
+    description: 'Updates a user by id.',
   })
   @ApiParam({
     name: 'id',

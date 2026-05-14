@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
@@ -10,16 +14,17 @@ import { AuthProvider } from '../../enums/auth-provider.enum';
 @Injectable()
 export class MicrosoftTokenVerifierService {
   private readonly audience: string;
-  private readonly issuer: string;
+  private readonly tenantId: string;
   private readonly client: jwksClient.JwksClient;
 
   constructor(private readonly configService: ConfigService) {
-    const tenantId = this.configService.get<string>('microsoft.tenantId');
-    this.audience = this.configService.get<string>('microsoft.clientId') ?? '';
-    this.issuer = `https://login.microsoftonline.com/${tenantId}/v2.0`;
+    this.tenantId =
+      this.configService.get<string>('oauth.microsoft.tenantId') ?? 'common';
+    this.audience =
+      this.configService.get<string>('oauth.microsoft.clientId') ?? '';
 
     this.client = jwksClient({
-      jwksUri: `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,
+      jwksUri: `https://login.microsoftonline.com/${this.tenantId}/discovery/v2.0/keys`,
       cache: true,
       cacheMaxEntries: 5,
       cacheMaxAge: 10 * 60 * 1000,
@@ -33,6 +38,12 @@ export class MicrosoftTokenVerifierService {
     lastName: string;
     provider: AuthProvider.MICROSOFT;
   }> {
+    if (!this.audience) {
+      throw new ServiceUnavailableException('Microsoft SSO is not configured');
+    }
+
+    const acceptedIssuers = this.resolveAcceptedIssuers(idToken);
+
     const decoded = await new Promise<any>((resolve, reject) => {
       jwt.verify(
         idToken,
@@ -44,7 +55,7 @@ export class MicrosoftTokenVerifierService {
         },
         {
           audience: this.audience,
-          issuer: this.issuer,
+          issuer: acceptedIssuers,
         },
         (err, payload) => {
           if (err) return reject(err);
@@ -67,5 +78,36 @@ export class MicrosoftTokenVerifierService {
       lastName: rest.join(' '),
       provider: AuthProvider.MICROSOFT,
     };
+  }
+
+  private resolveAcceptedIssuers(idToken: string): [string, ...string[]] {
+    const decoded = jwt.decode(idToken);
+    const payload =
+      decoded && typeof decoded === 'object'
+        ? (decoded as jwt.JwtPayload)
+        : null;
+    const tokenTenantId =
+      typeof payload?.tid === 'string' && payload.tid.trim().length > 0
+        ? payload.tid.trim()
+        : null;
+
+    if (this.isTenantIndependentConfig() && tokenTenantId) {
+      return this.buildIssuerCandidates(tokenTenantId);
+    }
+
+    return this.buildIssuerCandidates(this.tenantId);
+  }
+
+  private isTenantIndependentConfig(): boolean {
+    return ['common', 'organizations', 'consumers'].includes(
+      this.tenantId.toLowerCase(),
+    );
+  }
+
+  private buildIssuerCandidates(tenantId: string): [string, ...string[]] {
+    return [
+      `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      `https://sts.windows.net/${tenantId}/`,
+    ];
   }
 }

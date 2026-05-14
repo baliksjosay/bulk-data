@@ -29,7 +29,7 @@ export class TotpSetupService {
     private readonly factorRepo: Repository<UserAuthFactor>,
     private readonly usersService: UserService,
     private readonly securityAuditService: SecurityAuditService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
   ) {}
 
   async beginSetup(
@@ -64,7 +64,7 @@ export class TotpSetupService {
     const otpauthUrl = generateURI({
       secret,
       label: user.email,
-      issuer: this.config.get('app.name')
+      issuer: this.config.get('app.name'),
     });
 
     return {

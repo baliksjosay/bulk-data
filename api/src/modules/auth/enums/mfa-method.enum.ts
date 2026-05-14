@@ -3,6 +3,5 @@ export enum MfaMethod {
   EMAIL_OTP = 'email-otp',
   SMS_OTP = 'sms-otp',
   WEBAUTHN = 'webauthn',
-  RECOVERY_CODE='recovery-code'
-
+  RECOVERY_CODE = 'recovery-code',
 }

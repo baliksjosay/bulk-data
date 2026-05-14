@@ -2,36 +2,46 @@ import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
 import { MailerOptions } from '@nestjs-modules/mailer';
-// templates folder should be at the root level of src
-// make sure to adjust the path with the contents if it's located elsewhere
-// find it at api/src/templates
-const templatesDir = join(process.cwd(), 'src', 'shared', 'templates', 'email');
-export const mailerConfig = (config: ConfigService): MailerOptions => ({
-  transport: {
-    host: config.get<string>('SMTP_HOST', 'localhost'),
-    port: config.get<number>('SMTP_PORT', 25),
-    secure: false,
-    auth: {
-      user: config.get<string>('SMTP_USER', ''),
-      pass: config.get<string>('SMTP_PASS', ''),
+const templatesDir = join(process.cwd(), 'src', 'shared', 'templates');
+export const mailerConfig = (config: ConfigService): MailerOptions => {
+  const smtpUser = config.get<string>('SMTP_USER', '');
+  const smtpPass = config.get<string>('SMTP_PASS', '');
+  const smtpSecure = config.get<boolean | string>('SMTP_SECURE', false);
+
+  return {
+    transport: {
+      host: config.get<string>('SMTP_HOST', 'localhost'),
+      port: Number(config.get<number | string>('SMTP_PORT', 25)),
+      secure: smtpSecure === true || smtpSecure === 'true',
+      ...(smtpUser
+        ? {
+            auth: {
+              user: smtpUser,
+              pass: smtpPass,
+            },
+          }
+        : {}),
     },
-  },
-  defaults: {
-    from: {
-      name: config.get<string>('SENDER_NAME', 'No Reply'),
-      address: config.get<string>('SENDER_ADDRESS', ''),
+    defaults: {
+      from: {
+        name: config.get<string>('SENDER_NAME', 'MTN Bulk Data'),
+        address:
+          config.get<string>('SENDER_ADDRESS', '') ||
+          smtpUser ||
+          'bulkdata@mtn.co.ug',
+      },
     },
-  },
-  // preview: {
-  //   dir: templatesDir,
-  //   open: false, // config.get<boolean>('SMTP_PREVIEW_EMAIL', false),
-  // },
-  template: {
-    dir: templatesDir,
-    adapter: new HandlebarsAdapter({
-      eq: (a: any, b: any) => a === b,
-      ne: (a: any, b: any) => a !== b,
-    }),
-    options: { strict: true },
-  },
-});
+    // preview: {
+    //   dir: templatesDir,
+    //   open: false, // config.get<boolean>('SMTP_PREVIEW_EMAIL', false),
+    // },
+    template: {
+      dir: templatesDir,
+      adapter: new HandlebarsAdapter({
+        eq: (a: unknown, b: unknown) => a === b,
+        ne: (a: unknown, b: unknown) => a !== b,
+      }),
+      options: { strict: true },
+    },
+  };
+};

@@ -8,8 +8,6 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-
-
 @Entity('user_auth_factors')
 @Index(['userId', 'type'])
 export class UserAuthFactor {

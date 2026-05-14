@@ -7,8 +7,4 @@ declare namespace Storage {
     mimetype: string;
     size: number;
   }
-  [];
 }
-
-
-

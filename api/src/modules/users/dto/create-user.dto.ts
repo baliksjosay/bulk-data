@@ -1,4 +1,3 @@
-
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayNotEmpty,
@@ -8,7 +7,6 @@ import {
   IsOptional,
   IsPhoneNumber,
   IsString,
-  IsUUID,
   MaxLength,
   MinLength,
   ValidateIf,

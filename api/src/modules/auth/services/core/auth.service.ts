@@ -3,15 +3,22 @@ import {
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 import { plainToInstance } from 'class-transformer';
 import * as crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { Repository } from 'typeorm';
 
 import { UserResponseDto } from '../../../users/dto/user-response.dto';
 import { AuthProvider } from '../../enums/auth-provider.enum';
 import { AuthResponseDto } from '../../dto/auth-response.dto';
 import { LoginDto } from '../../dto/login.dto';
 import { OtpLoginDto } from '../../dto/otp-login.dto';
+import {
+  RequestOtpLoginDto,
+  RequestOtpLoginResponseDto,
+} from '../../dto/request-otp-login.dto';
 import { RefreshTokenDto } from '../../dto/refresh-token.dto';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
@@ -33,13 +40,34 @@ import { MfaFactorSelectorService } from '../mfa/mfa-factor-selector.service';
 import { User } from 'src/modules/users/entities/user.entity';
 import { WebauthnAuthenticationService } from '../webauthn/webauthn-authentication.service';
 import { MfaRecoveryCodeService } from '../mfa/mfa-recovery-codes.service';
-import { LocalActiveDirectoryService } from '../active-directory.service';
+import {
+  ActiveDirectoryAuthenticatedProfile,
+  LocalActiveDirectoryService,
+} from '../active-directory.service';
 import { UserRole } from 'src/modules/users/enums/user-role.enum';
 import { BulkCustomersRepository } from 'src/modules/bulk-data/repositories';
+import { AuthChallenge } from '../../entities/auth-challenge.entity';
+import { AuthChallengeType } from '../../enums/auth-challenge-type.enum';
+
+type CustomerOtpDelivery = {
+  deliveryChannel: 'sms' | 'email';
+  destination: string;
+  maskedDestination: string;
+};
+
+type PasswordLoginIdentifierKind = 'email' | 'phone' | 'tin' | 'username';
+
+type PasswordLoginIdentity = {
+  identifier: string;
+  identifierKind: PasswordLoginIdentifierKind;
+  user: User | null;
+};
 
 @Injectable()
 export class AuthService {
   constructor(
+    @InjectRepository(AuthChallenge)
+    private readonly authChallengeRepo: Repository<AuthChallenge>,
     private readonly usersService: UserService,
     private readonly userSessionsService: UserSessionsService,
     private readonly passwordService: PasswordService,
@@ -55,6 +83,7 @@ export class AuthService {
     private readonly mfaRecoveryCodeService: MfaRecoveryCodeService,
     private readonly activeDirectoryService: LocalActiveDirectoryService,
     private readonly bulkCustomersRepository: BulkCustomersRepository,
+    private readonly configService: ConfigService,
   ) {}
 
   async loginWithPassword(
@@ -62,39 +91,49 @@ export class AuthService {
     context: SecurityContext,
   ): Promise<AuthResponseDto> {
     const identifier = this.getPasswordLoginIdentifier(dto);
-    const user = await this.usersService.findByStaffLoginIdentifier(
-      identifier,
-      true,
-    );
+    const identity = await this.findUserForPasswordLoginIdentifier(identifier);
+    let user = identity.user;
+    let directoryAuthenticatedUser: User | null = null;
+
+    if (!user && identity.identifierKind === 'username') {
+      directoryAuthenticatedUser =
+        await this.resolveUnlinkedActiveDirectoryStaffLogin(
+          identity.identifier,
+          dto.password,
+        );
+      user = directoryAuthenticatedUser;
+    }
 
     if (!user) {
       await this.securityAuditService.log({
         eventType: SecurityEventType.LOGIN_FAILED,
         success: false,
-        reason: 'staff_user_not_found',
+        reason: 'password_user_not_found',
         authMethod: AuthEntryMethod.PASSWORD,
-        metadata: { identifier },
+        metadata: { identifierKind: identity.identifierKind },
         ...context,
       });
 
       throw new UnauthorizedException('Invalid username or password');
     }
 
-    if (!this.isStaffUser(user)) {
+    if (!this.canUsePasswordLogin(user, identity.identifierKind)) {
       await this.securityAuditService.log({
         eventType: SecurityEventType.LOGIN_FAILED,
         userId: user.id,
         email: user.email,
         success: false,
-        reason: 'password_login_not_allowed_for_role',
+        reason: 'password_login_not_allowed_for_identifier',
         authMethod: AuthEntryMethod.PASSWORD,
-        metadata: { identifier, roles: user.roles },
+        metadata: {
+          identifierKind: identity.identifierKind,
+          roles: user.roles,
+          authProvider: user.authProvider,
+        },
         ...context,
       });
 
-      throw new UnauthorizedException(
-        'Password login is available only to MTN staff users',
-      );
+      throw new UnauthorizedException('Invalid username or password');
     }
 
     await this.usersService.ensureUserCanLogin(user);
@@ -133,15 +172,29 @@ export class AuthService {
         },
       });
     }
-    let valid;
+    let authenticatedUser = directoryAuthenticatedUser ?? user;
+    let valid = Boolean(directoryAuthenticatedUser);
     if (user.authProvider === AuthProvider.LOCAL) {
-      valid = await bcrypt.compare(dto.password, user.password);
-    } else {
-      const providerUsername = user.externalId?.trim() || identifier;
-      valid = await this.activeDirectoryService.initiateLogin(user, {
-        username: providerUsername,
-        password: dto.password,
-      });
+      valid = user.password
+        ? await bcrypt.compare(dto.password, user.password)
+        : false;
+    } else if (user.authProvider === AuthProvider.AD && !valid) {
+      const providerUsername = user.externalId?.trim() || identity.identifier;
+      try {
+        authenticatedUser = await this.activeDirectoryService.initiateLogin(
+          user,
+          {
+            username: providerUsername,
+            password: dto.password,
+          },
+        );
+        valid = true;
+      } catch (error) {
+        if (!(error instanceof UnauthorizedException)) {
+          throw error;
+        }
+        valid = false;
+      }
     }
 
     if (valid === false || valid === undefined || valid === null) {
@@ -196,16 +249,20 @@ export class AuthService {
     await this.usersService.recordSuccessfulLogin(user.id);
 
     if (decision.requiresMfa) {
-      return this.createMfaSelectionResponse(user, AuthEntryMethod.PASSWORD, {
-        authProvider: user.authProvider,
-        riskScore: decision.risk.score,
-        riskReasons: decision.risk.reasons,
-        deviceId: context.deviceId ?? dto.deviceId,
-      });
+      return this.createMfaSelectionResponse(
+        authenticatedUser,
+        AuthEntryMethod.PASSWORD,
+        {
+          authProvider: authenticatedUser.authProvider,
+          riskScore: decision.risk.score,
+          riskReasons: decision.risk.reasons,
+          deviceId: context.deviceId ?? dto.deviceId,
+        },
+      );
     }
 
     const authResult = await this.createAuthenticatedSession(
-      user,
+      authenticatedUser,
       decision.maxActiveSessions,
       context,
       dto.deviceId,
@@ -213,11 +270,11 @@ export class AuthService {
 
     await this.securityAuditService.log({
       eventType: SecurityEventType.LOGIN_SUCCESS,
-      userId: user.id,
-      email: user.email,
+      userId: authenticatedUser.id,
+      email: authenticatedUser.email,
       success: true,
       authMethod: AuthEntryMethod.PASSWORD,
-      authProvider: user.authProvider,
+      authProvider: authenticatedUser.authProvider,
       metadata: {
         sessionId: authResult.sessionId,
         riskScore: decision.risk.score,
@@ -231,9 +288,117 @@ export class AuthService {
 
     return this.createSuccessfulLoginResponse(
       authResult,
-      user,
+      authenticatedUser,
       AuthEntryMethod.PASSWORD,
     );
+  }
+
+  async requestOtpLogin(
+    dto: RequestOtpLoginDto,
+    context: SecurityContext,
+  ): Promise<RequestOtpLoginResponseDto> {
+    const user = await this.findUserForOtpRequest(dto);
+    const acceptedResponse: RequestOtpLoginResponseDto = {
+      accepted: true,
+      retryAfterSeconds: 60,
+    };
+
+    if (!user || !this.isCustomerOnlyUser(user)) {
+      await this.securityAuditService.log({
+        eventType: SecurityEventType.LOGIN_FAILED,
+        success: false,
+        reason: user
+          ? 'otp_request_not_allowed_for_role'
+          : 'otp_request_user_not_found',
+        authMethod: AuthEntryMethod.OTP,
+        metadata: {
+          identifier: dto.identifier,
+          identifierKind: dto.identifierKind,
+        },
+        ...context,
+      });
+
+      return acceptedResponse;
+    }
+
+    await this.usersService.ensureUserCanLogin(user);
+
+    const delivery = this.resolveCustomerOtpDelivery(user, dto);
+
+    if (!delivery) {
+      await this.securityAuditService.log({
+        eventType: SecurityEventType.LOGIN_FAILED,
+        userId: user.id,
+        email: user.email,
+        success: false,
+        reason: 'otp_request_delivery_channel_unavailable',
+        authMethod: AuthEntryMethod.OTP,
+        metadata: {
+          identifier: dto.identifier,
+          identifierKind: dto.identifierKind,
+          requestedDeliveryChannel: dto.deliveryChannel,
+        },
+        ...context,
+      });
+
+      return acceptedResponse;
+    }
+
+    const otp = this.generateNumericOtp(5);
+    const otpHash = await this.passwordService.hash(otp);
+    const expirySeconds = this.configService.get<number>(
+      'otp.expirySeconds',
+      180,
+    );
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+    const challenge = this.authChallengeRepo.create({
+      userId: user.id,
+      type: AuthChallengeType.MFA,
+      challenge: crypto.randomUUID(),
+      expiresAt,
+      isUsed: false,
+      payload: {
+        purpose: 'customer_login_otp',
+        otpHash,
+        identifier: dto.identifier,
+        identifierKind: dto.identifierKind,
+        deliveryChannel: delivery.deliveryChannel,
+      },
+    });
+    const saved = await this.authChallengeRepo.save(challenge);
+
+    await this.authNotificationService.sendCustomerLoginOtpRequested({
+      userId: user.id,
+      challengeId: saved.id,
+      deliveryChannel: delivery.deliveryChannel,
+      destination: delivery.destination,
+      otp,
+      expiresAt,
+    });
+
+    await this.securityAuditService.log({
+      eventType: SecurityEventType.MFA_CHALLENGE_STARTED,
+      userId: user.id,
+      email: user.email,
+      success: true,
+      authMethod: AuthEntryMethod.OTP,
+      metadata: {
+        challengeId: saved.id,
+        purpose: 'customer_login_otp',
+        identifierKind: dto.identifierKind,
+        deliveryChannel: delivery.deliveryChannel,
+      },
+      ...context,
+    });
+
+    return {
+      accepted: true,
+      challengeId: saved.id,
+      maskedDestination: delivery.maskedDestination,
+      deliveryChannel: delivery.deliveryChannel,
+      expiresAt: expiresAt.toISOString(),
+      retryAfterSeconds: 60,
+    };
   }
 
   async loginWithOtp(
@@ -291,8 +456,7 @@ export class AuthService {
     this.authPolicyService.assertEmailVerificationSatisfied(user, decision);
     this.authPolicyService.assertPhoneVerificationSatisfied(user, decision);
 
-    const expectedOtp = this.getConfiguredOtpLoginCode();
-    const otpMatches = expectedOtp && dto.otp.trim() === expectedOtp;
+    const otpMatches = await this.verifyCustomerOtpLoginChallenge(user, dto);
 
     if (!otpMatches) {
       await this.securityAuditService.log({
@@ -300,7 +464,7 @@ export class AuthService {
         userId: user.id,
         email: user.email,
         success: false,
-        reason: expectedOtp ? 'invalid_otp_code' : 'otp_login_not_configured',
+        reason: 'invalid_otp_code',
         authMethod: AuthEntryMethod.OTP,
         metadata: {
           identifier: dto.identifier,
@@ -346,6 +510,42 @@ export class AuthService {
     return this.createSuccessfulLoginResponse(
       authResult,
       user,
+      AuthEntryMethod.OTP,
+    );
+  }
+
+  async createActivatedCustomerSession(
+    user: User,
+    context: SecurityContext,
+  ): Promise<AuthResponseDto> {
+    await this.usersService.ensureUserCanLogin(user);
+
+    const authResult = await this.createAuthenticatedSession(
+      user,
+      1,
+      context,
+      context.deviceId,
+    );
+
+    await this.usersService.recordSuccessfulLogin(user.id);
+    await this.securityAuditService.log({
+      eventType: SecurityEventType.LOGIN_SUCCESS,
+      userId: user.id,
+      email: user.email,
+      success: true,
+      authMethod: AuthEntryMethod.OTP,
+      authProvider: user.authProvider,
+      metadata: {
+        activationAutoLogin: true,
+        sessionId: authResult.sessionId,
+      },
+      ...context,
+    });
+
+    const refreshedUser = await this.usersService.requireById(user.id);
+    return this.createSuccessfulLoginResponse(
+      authResult,
+      refreshedUser,
       AuthEntryMethod.OTP,
     );
   }
@@ -624,7 +824,7 @@ export class AuthService {
       requestedMethod === MfaMethod.RECOVERY_CODE
         ? null
         : await this.mfaService.createChallenge(requestedMethod, user.id, {
-            method: entryMethod,
+            entryMethod,
             riskScore: Number(selectionPayload.riskScore ?? 0),
             selectedByUser: true,
           });
@@ -666,9 +866,7 @@ export class AuthService {
       mfaChallengeMetadata: mfaChallenge?.metadata,
       preferredMfaMethod:
         this.getPreferredMethodFromAvailable(availableMethods),
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
+      user: await this.createUserResponse(user),
     };
   }
 
@@ -921,9 +1119,7 @@ export class AuthService {
       refreshToken: newRefreshToken,
       sessionId: session.id,
       mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
+      user: await this.createUserResponse(user),
     };
   }
 
@@ -954,19 +1150,146 @@ export class AuthService {
     });
   }
 
+  private findUserForOtpRequest(dto: RequestOtpLoginDto): Promise<User | null> {
+    return this.findUserForOtpIdentifier(dto.identifier, dto.identifierKind);
+  }
+
   private async findUserForOtpLogin(dto: OtpLoginDto): Promise<User | null> {
-    const identifier = dto.identifier.trim();
+    return this.findUserForOtpIdentifier(dto.identifier, dto.identifierKind);
+  }
+
+  private async findUserForPasswordLoginIdentifier(
+    rawIdentifier: string,
+  ): Promise<PasswordLoginIdentity> {
+    const identifier = rawIdentifier.trim();
+    const normalizedIdentifier = identifier.toLowerCase();
+
+    if (normalizedIdentifier.includes('@')) {
+      return {
+        identifier: normalizedIdentifier,
+        identifierKind: 'email',
+        user: await this.usersService.findByEmail(normalizedIdentifier, true),
+      };
+    }
+
+    if (/^[+\d\s()-]+$/.test(identifier)) {
+      const normalizedPhone = this.normalizeOtpPhoneIdentifier(identifier);
+      const phoneUser = await this.usersService.findByPhoneNumber(
+        normalizedPhone,
+        true,
+      );
+
+      if (phoneUser) {
+        return {
+          identifier: normalizedPhone,
+          identifierKind: 'phone',
+          user: phoneUser,
+        };
+      }
+
+      if (this.looksLikeTin(identifier)) {
+        const tinUser = await this.findCustomerUserByTin(identifier, true);
+
+        if (tinUser) {
+          return {
+            identifier: this.normalizeTinIdentifier(identifier),
+            identifierKind: 'tin',
+            user: tinUser,
+          };
+        }
+      }
+    }
+
+    if (this.looksLikeTin(identifier)) {
+      const tinUser = await this.findCustomerUserByTin(identifier, true);
+
+      if (tinUser) {
+        return {
+          identifier: this.normalizeTinIdentifier(identifier),
+          identifierKind: 'tin',
+          user: tinUser,
+        };
+      }
+    }
+
+    return {
+      identifier: normalizedIdentifier,
+      identifierKind: 'username',
+      user: await this.usersService.findByStaffLoginIdentifier(
+        normalizedIdentifier,
+        true,
+      ),
+    };
+  }
+
+  private async resolveUnlinkedActiveDirectoryStaffLogin(
+    username: string,
+    password: string,
+  ): Promise<User | null> {
+    if (!this.activeDirectoryService.isConfigured()) {
+      return null;
+    }
+
+    let profile: ActiveDirectoryAuthenticatedProfile;
+
+    try {
+      profile = await this.activeDirectoryService.authenticate({
+        username,
+        password,
+      });
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException
+      ) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    return this.findProvisionedActiveDirectoryStaffForProfile(profile);
+  }
+
+  private async findProvisionedActiveDirectoryStaffForProfile(
+    profile: ActiveDirectoryAuthenticatedProfile,
+  ): Promise<User | null> {
+    if (!profile.emailAddress) {
+      return null;
+    }
+
+    const user = await this.usersService.findByEmail(
+      profile.emailAddress,
+      true,
+    );
+
+    if (
+      !user ||
+      user.authProvider !== AuthProvider.AD ||
+      !this.isStaffUser(user)
+    ) {
+      return null;
+    }
+
+    return this.activeDirectoryService.syncAuthenticatedProfile(user, profile);
+  }
+
+  private async findUserForOtpIdentifier(
+    rawIdentifier: string,
+    identifierKind?: 'phone' | 'email' | 'tin',
+  ): Promise<User | null> {
+    const identifier = rawIdentifier.trim();
     const normalizedEmail = identifier.toLowerCase();
 
-    if (dto.identifierKind === 'email' || normalizedEmail.includes('@')) {
+    if (identifierKind === 'email' || normalizedEmail.includes('@')) {
       return this.usersService.findByEmail(normalizedEmail);
     }
 
-    if (dto.identifierKind === 'tin') {
+    if (identifierKind === 'tin') {
       return this.findCustomerUserByTin(identifier);
     }
 
-    if (dto.identifierKind === 'phone' || /^[+\d\s()-]+$/.test(identifier)) {
+    if (identifierKind === 'phone' || /^[+\d\s()-]+$/.test(identifier)) {
       const user = await this.usersService.findByPhoneNumber(
         this.normalizeOtpPhoneIdentifier(identifier),
       );
@@ -975,7 +1298,7 @@ export class AuthService {
         return user;
       }
 
-      if (dto.identifierKind === 'phone') {
+      if (identifierKind === 'phone') {
         return null;
       }
     }
@@ -985,13 +1308,129 @@ export class AuthService {
       : null;
   }
 
+  private async verifyCustomerOtpLoginChallenge(
+    user: User,
+    dto: OtpLoginDto,
+  ): Promise<boolean> {
+    const challenge = await this.findCustomerOtpLoginChallenge(user, dto);
+
+    if (!challenge) {
+      if (dto.challengeId) {
+        return false;
+      }
+
+      const expectedOtp = this.getConfiguredOtpLoginCode();
+      return Boolean(expectedOtp && dto.otp.trim() === expectedOtp);
+    }
+
+    if (challenge.expiresAt < new Date()) {
+      return false;
+    }
+
+    const purpose = String(challenge.payload?.purpose ?? '');
+    const otpHash = String(challenge.payload?.otpHash ?? '');
+
+    if (purpose !== 'customer_login_otp' || !otpHash) {
+      return false;
+    }
+
+    const valid = await this.passwordService.compare(dto.otp.trim(), otpHash);
+
+    if (!valid) {
+      return false;
+    }
+
+    challenge.isUsed = true;
+    await this.authChallengeRepo.save(challenge);
+
+    return true;
+  }
+
+  private async findCustomerOtpLoginChallenge(
+    user: User,
+    dto: OtpLoginDto,
+  ): Promise<AuthChallenge | null> {
+    if (dto.challengeId) {
+      return this.authChallengeRepo.findOne({
+        where: {
+          id: dto.challengeId,
+          userId: user.id,
+          type: AuthChallengeType.MFA,
+          isUsed: false,
+        },
+      });
+    }
+
+    const challenges = await this.authChallengeRepo.find({
+      where: {
+        userId: user.id,
+        type: AuthChallengeType.MFA,
+        isUsed: false,
+      },
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+
+    return (
+      challenges.find(
+        (challenge) => challenge.payload?.purpose === 'customer_login_otp',
+      ) ?? null
+    );
+  }
+
+  private resolveCustomerOtpDelivery(
+    user: User,
+    dto: RequestOtpLoginDto,
+  ): CustomerOtpDelivery | null {
+    const requested = dto.deliveryChannel;
+    const email = user.email?.trim();
+    const phoneNumber = user.phoneNumber?.trim();
+
+    if (requested === 'email' && email) {
+      return {
+        deliveryChannel: 'email',
+        destination: email,
+        maskedDestination: this.maskEmail(email),
+      };
+    }
+
+    if (requested === 'sms' && phoneNumber) {
+      return {
+        deliveryChannel: 'sms',
+        destination: phoneNumber,
+        maskedDestination: this.maskPhone(phoneNumber),
+      };
+    }
+
+    if (phoneNumber) {
+      return {
+        deliveryChannel: 'sms',
+        destination: phoneNumber,
+        maskedDestination: this.maskPhone(phoneNumber),
+      };
+    }
+
+    if (email) {
+      return {
+        deliveryChannel: 'email',
+        destination: email,
+        maskedDestination: this.maskEmail(email),
+      };
+    }
+
+    return null;
+  }
+
   private async findCustomerUserByTin(
     identifier: string,
+    includePassword = false,
   ): Promise<User | null> {
+    const normalizedIdentifier = this.normalizeTinIdentifier(identifier);
     const customer =
-      await this.bulkCustomersRepository.findByRegistrationNumber(
-        this.normalizeTinIdentifier(identifier),
-      );
+      (await this.bulkCustomersRepository.findByTin(normalizedIdentifier)) ??
+      (await this.bulkCustomersRepository.findByRegistrationNumber(
+        normalizedIdentifier,
+      ));
 
     if (!customer) {
       return null;
@@ -999,7 +1438,7 @@ export class AuthService {
 
     const email = customer.email?.trim().toLowerCase();
     if (email) {
-      const user = await this.usersService.findByEmail(email);
+      const user = await this.usersService.findByEmail(email, includePassword);
       if (user) {
         return user;
       }
@@ -1009,6 +1448,7 @@ export class AuthService {
     if (phone) {
       return this.usersService.findByPhoneNumber(
         this.normalizeOtpPhoneIdentifier(phone),
+        includePassword,
       );
     }
 
@@ -1047,28 +1487,75 @@ export class AuthService {
     return trimmed;
   }
 
+  private maskEmail(email: string): string {
+    const [localPart, domain = ''] = email.split('@');
+    const visibleLocal = localPart.slice(0, 2);
+    return `${visibleLocal}${'*'.repeat(Math.max(localPart.length - 2, 2))}@${domain}`;
+  }
+
+  private maskPhone(phoneNumber: string): string {
+    const digits = phoneNumber.replace(/\D/g, '');
+    return `${'*'.repeat(Math.max(digits.length - 4, 4))}${digits.slice(-4)}`;
+  }
+
+  private generateNumericOtp(length: number): string {
+    const digits = '0123456789';
+    let value = '';
+
+    for (let index = 0; index < length; index += 1) {
+      value += digits[crypto.randomInt(0, digits.length)];
+    }
+
+    return value;
+  }
+
   private getConfiguredOtpLoginCode(): string | null {
     const configured =
       process.env.DEMO_LOGIN_OTP ?? process.env.AUTH_OTP_LOGIN_CODE;
     const code =
       configured?.trim() ||
-      (process.env.SEED_DEMO_USERS === 'true' ? '123456' : '');
+      (process.env.SEED_DEMO_USERS === 'true' ? '12345' : '');
 
     return /^\d{5}$/.test(code) ? code : null;
   }
 
   private getPasswordLoginIdentifier(dto: LoginDto): string {
-    const identifier = (dto.username ?? dto.email ?? dto.phoneNumber ?? '')
+    const identifier = (
+      dto.identifier ??
+      dto.username ??
+      dto.email ??
+      dto.phoneNumber ??
+      ''
+    )
       .trim()
       .toLowerCase();
 
     if (!identifier) {
       throw new BadRequestException(
-        'Username, email, or phone number is required',
+        'TIN, phone number, email, or staff username is required',
       );
     }
 
     return identifier;
+  }
+
+  private canUsePasswordLogin(
+    user: User,
+    identifierKind: PasswordLoginIdentifierKind,
+  ): boolean {
+    if (this.isStaffUser(user)) {
+      return (
+        (user.authProvider === AuthProvider.AD ||
+          user.authProvider === AuthProvider.LOCAL) &&
+        identifierKind === 'username'
+      );
+    }
+
+    return (
+      this.isCustomerOnlyUser(user) &&
+      user.authProvider === AuthProvider.LOCAL &&
+      ['email', 'phone', 'tin'].includes(identifierKind)
+    );
   }
 
   private isStaffUser(user: User): boolean {
@@ -1134,9 +1621,7 @@ export class AuthService {
       availableMfaMethods,
       preferredMfaMethod,
       mfaMethod: preferredMfaMethod,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
+      user: await this.createUserResponse(user),
     };
   }
 
@@ -1194,9 +1679,7 @@ export class AuthService {
     return {
       ...authResult,
       mfaRequired: false,
-      user: plainToInstance(UserResponseDto, user, {
-        excludeExtraneousValues: true,
-      }),
+      user: await this.createUserResponse(user),
       promptPasswordlessSetup,
       passwordlessSetupPrompt: promptPasswordlessSetup
         ? {
@@ -1207,6 +1690,29 @@ export class AuthService {
           }
         : undefined,
     };
+  }
+
+  private async createUserResponse(user: User): Promise<UserResponseDto> {
+    const response = plainToInstance(UserResponseDto, user, {
+      excludeExtraneousValues: true,
+    });
+    const customerId = await this.resolveCustomerIdForUser(user);
+
+    if (customerId) {
+      response.customerId = customerId;
+    }
+
+    return response;
+  }
+
+  private async resolveCustomerIdForUser(user: User): Promise<string | null> {
+    if (!user.roles.includes(UserRole.CUSTOMER)) {
+      return null;
+    }
+
+    const customer = await this.bulkCustomersRepository.findByEmail(user.email);
+
+    return customer?.id ?? null;
   }
 
   private async shouldPromptPasswordlessSetup(

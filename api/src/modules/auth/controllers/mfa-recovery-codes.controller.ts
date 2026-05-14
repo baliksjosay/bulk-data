@@ -17,7 +17,11 @@ import {
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { GenericAuthMessageDto } from '../dto/generic-authmessage.dto';
 import { MfaRecoveryCodeService } from '../services/mfa/mfa-recovery-codes.service';
-import { AcknowledgeRecoveryCodesDto, MfaRecoveryCodesResponseDto, MfaRecoveryStatusDto } from '../dto/mfa/mfa-recovery-codes.dto';
+import {
+  AcknowledgeRecoveryCodesDto,
+  MfaRecoveryCodesResponseDto,
+  MfaRecoveryStatusDto,
+} from '../dto/mfa/mfa-recovery-codes.dto';
 
 @ApiTags('Authentication - MFA Recovery')
 @ApiBearerAuth()

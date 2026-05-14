@@ -10,6 +10,6 @@ export const cacheConfig = async (
     host: config.get<string>('REDIS_HOST', 'localhost'),
     port: config.get<number>('REDIS_PORT', 6379),
     password: config.get<string>('REDIS_PASSWORD'),
-    ttl: 600, 
+    ttl: 600,
   }),
 });

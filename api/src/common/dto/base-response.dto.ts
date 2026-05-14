@@ -16,7 +16,6 @@ export class BaseResponseDto {
   updatedAt: Date;
 }
 
-
 export class PaginatedResponseDto<T> {
   @ApiProperty({ isArray: true })
   data: T[];

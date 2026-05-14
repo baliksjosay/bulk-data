@@ -63,7 +63,7 @@ export class User {
 
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.PENDING })
   status: UserStatus;
-  
+
   @Column({ default: false })
   emailVerified: boolean;
 

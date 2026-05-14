@@ -4,21 +4,20 @@ import { ConfigService } from '@nestjs/config';
 export const databaseConfig = (
   configService: ConfigService,
 ): TypeOrmModuleOptions => ({
-  type: "postgres",
-  host: configService.get<string>("DB_HOST"),
-  port: Number.parseInt(configService.get<string>("DB_PORT"), 10),
-  username: configService.get<string>("DB_USER"),
-  password: configService.get<string>("DB_PASS"),
-  database: configService.get<string>("DB_NAME"),
-  entities: ["dist/**/*.entity{.ts,.js}"],
-  synchronize: configService.get<string>("NODE_ENV") === "development",
-  logging: false, //configService.get<string>("NODE_ENV") === "development",
-  ssl:
-    configService.get<string>("DB_SSL") === "true"
-      ? { rejectUnauthorized: false }
-      : false,
+  type: 'postgres',
+  host: configService.get<string>('database.host'),
+  port: configService.get<number>('database.port'),
+  username: configService.get<string>('database.username'),
+  password: configService.get<string>('database.password'),
+  database: configService.get<string>('database.name'),
+  autoLoadEntities: true,
+  synchronize: configService.get<boolean>('database.synchronize', false),
+  logging: configService.get<boolean>('database.logging', false),
+  ssl: configService.get<boolean>('database.ssl', false)
+    ? { rejectUnauthorized: false }
+    : false,
   extra: {
-    max: 20,
+    max: configService.get<number>('database.poolSize', 20),
     connectionTimeoutMillis: 5000,
   },
 });
