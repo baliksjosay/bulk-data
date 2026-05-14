@@ -79,7 +79,8 @@ export function TextField({ label, fieldClassName, className, onValueChange, ...
 }
 
 export function PhoneField({ label, fieldClassName, className, value, onValueChange, ...props }: PhoneFieldProps) {
-  const phoneValue = normalizeUgandaPhoneInput(value);
+  const phoneValue =
+    value || props.required ? normalizeUgandaPhoneInput(value) : "";
 
   return (
     <Label className={cn("flex flex-col items-stretch gap-2 text-sm font-medium", fieldClassName)}>
@@ -95,6 +96,11 @@ export function PhoneField({ label, fieldClassName, className, value, onValueCha
         className={cn("h-10", className)}
         value={phoneValue}
         onChange={(event) => {
+          if (!event.target.value && !props.required) {
+            onValueChange("");
+            return;
+          }
+
           const nextValue = normalizeUgandaPhoneInput(event.target.value);
 
           if (isPossibleUgandaPhoneInput(nextValue)) {

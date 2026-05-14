@@ -174,11 +174,11 @@
     --destructive-foreground: oklch(1 0 0);
     --input: oklch(0.93 0.006 85);
     --ring: oklch(0.88 0.16 87);
-    --chart-1: #ffcb05;
-    --chart-2: #0369a1;
-    --chart-3: #166534;
-    --chart-4: #be123c;
-    --chart-5: #7c3aed;
+    --chart-1: #f3bf33;
+    --chart-2: #6fb7df;
+    --chart-3: #6fcf9a;
+    --chart-4: #f28c8c;
+    --chart-5: #b8a5f4;
     --radius: 0.65rem;
   }
 
@@ -216,11 +216,11 @@
     --destructive-foreground: oklch(1 0 0);
     --input: oklch(0.25 0.01 270);
     --ring: oklch(0.85 0.15 85);
-    --chart-1: #ffcb05;
-    --chart-2: #38bdf8;
-    --chart-3: #34d399;
-    --chart-4: #fb7185;
-    --chart-5: #a78bfa;
+    --chart-1: #ffd76a;
+    --chart-2: #8bd3f7;
+    --chart-3: #8ee6b7;
+    --chart-4: #f6a2a2;
+    --chart-5: #c8b9ff;
   }
 
   * {
@@ -279,6 +279,21 @@ select:not([multiple]) {
 textarea {
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: #141414;
+  box-shadow: 0 0 0 3px rgb(255 203 5 / 45%);
+  outline: none;
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):focus-visible,
+.dark textarea:focus-visible,
+.dark select:focus-visible {
+  border-color: #ffcb05;
+  box-shadow: 0 0 0 3px rgb(255 203 5 / 35%);
 }
 
 @layer utilities {

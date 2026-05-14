@@ -96,6 +96,17 @@ function drawPdfRect(x: number, y: number, width: number, height: number, color:
   return `${color} rg ${x} ${y} ${width} ${height} re f\n`;
 }
 
+function drawPdfStrokeRect(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color = "0.86 0.86 0.82",
+  lineWidth = 0.8,
+) {
+  return `q ${lineWidth} w ${color} RG ${x} ${y} ${width} ${height} re S Q\n`;
+}
+
 function drawPdfEllipsePath(x: number, y: number, width: number, height: number) {
   const kappa = 0.5522847498;
   const ox = (width / 2) * kappa;
@@ -114,96 +125,117 @@ function drawPdfEllipsePath(x: number, y: number, width: number, height: number)
   ].join(" ");
 }
 
-function drawPdfMtnLogo(x: number, y: number) {
+function drawPdfMtnLogo(x: number, y: number, width = 70, height = 34) {
   return [
-    drawPdfRect(x, y, 78, 38, "1 0.8 0"),
-    "q 1.4 w 0.07 0.07 0.07 RG\n",
-    `${drawPdfEllipsePath(x + 10, y + 8, 58, 22)} S\n`,
+    "q 1.1 w 0.07 0.07 0.07 RG\n",
+    `${drawPdfEllipsePath(x + 4, y + 5, width - 8, height - 10)} S\n`,
     "Q\n",
     "0.07 0.07 0.07 rg\n",
-    writePdfText("MTN", x + 28, y + 19, 11, "F2"),
+    writePdfText("MTN", x + width / 2 - 11, y + height / 2 - 4, 10, "F2"),
   ].join("");
 }
 
 function buildReceiptPdf(transaction: ReceiptTransaction) {
   const rows = resolveReceiptRows(transaction);
-  const generatedAt = new Date().toLocaleString();
+  const generatedAt = new Date().toLocaleString("en-UG", { timeZone: "Africa/Kampala" });
   const status = sentenceCase(transaction.status);
   const paymentMethod = formatPaymentMethod(transaction.paymentMethod);
   const serviceRef = "registrationNumber" in transaction ? transaction.registrationNumber : transaction.primaryMsisdn;
+  const receiptId = truncatePdfText(transaction.id, 38);
+  const amount = formatUgx(transaction.amountUgx);
   const detailRows = rows.filter(
     ([label]) => !["Customer", "Bundle", "Payment method", "Amount", "Status"].includes(label),
   );
   const commands: string[] = [
     drawPdfRect(0, 0, 595, 842, "1 1 1"),
-    drawPdfRect(0, 810, 595, 32, "1 0.8 0"),
+    drawPdfRect(42, 798, 511, 4, "1 0.8 0"),
     drawPdfMtnLogo(44, 748),
     "0.07 0.07 0.07 rg\n",
-    writePdfText("MTN Uganda", 44, 724, 10, "F2"),
-    writePdfText("Plot 69-71 Jinja Road, Kampala", 44, 710, 8),
-    writePdfText("customerservice.ug@mtn.com | 100", 44, 698, 8),
-    writePdfText("OFFICIAL RECEIPT", 404, 770, 18, "F2"),
+    writePdfText("MTN Uganda", 126, 777, 11, "F2"),
+    writePdfText("Bulk Data Wholesale Service", 126, 762, 8, "F2"),
     "0.36 0.36 0.36 rg\n",
-    writePdfRightText(`Receipt No. ${transaction.id}`, 551, 746, 9, "F2"),
-    writePdfRightText(`Issue date: ${generatedAt}`, 551, 732, 8),
-    writePdfRightText(`Status: ${status}`, 551, 718, 8, "F2"),
-    drawPdfLine(44, 682, 551, 682),
+    writePdfText("Plot 69-71 Jinja Road, Kampala | customerservice.ug@mtn.com | 100", 126, 748, 7),
     "0.07 0.07 0.07 rg\n",
-    writePdfText("BILL TO", 44, 660, 9, "F2"),
-    writePdfText("PAYMENT SUMMARY", 346, 660, 9, "F2"),
+    writePdfRightText("OFFICIAL RECEIPT", 553, 778, 17, "F2"),
     "0.36 0.36 0.36 rg\n",
-    writePdfText(truncatePdfText(transaction.customerName, 42), 44, 642, 10, "F2"),
-    writePdfText(`Primary MSISDN: ${transaction.primaryMsisdn}`, 44, 626, 8),
-    writePdfText(`Reference: ${serviceRef}`, 44, 612, 8),
-    drawPdfRect(346, 618, 205, 44, "0.07 0.07 0.07"),
-    "1 0.8 0 rg\n",
-    writePdfText(formatUgx(transaction.amountUgx), 360, 638, 16, "F2"),
-    "1 1 1 rg\n",
-    writePdfRightText(paymentMethod, 537, 638, 9, "F2"),
-    drawPdfLine(44, 586, 551, 586),
+    writePdfRightText(`Receipt No. ${receiptId}`, 553, 758, 8, "F2"),
+    writePdfRightText(`Issued ${generatedAt}`, 553, 744, 7),
+    drawPdfLine(42, 730, 553, 730),
+
+    drawPdfRect(42, 658, 163, 54, "0.99 0.99 0.96"),
+    drawPdfRect(42, 708, 163, 4, "1 0.8 0"),
+    drawPdfStrokeRect(42, 658, 163, 54),
+    drawPdfRect(216, 658, 163, 54, "0.99 0.99 0.96"),
+    drawPdfRect(216, 708, 163, 4, "1 0.8 0"),
+    drawPdfStrokeRect(216, 658, 163, 54),
+    drawPdfRect(390, 658, 163, 54, "0.99 0.99 0.96"),
+    drawPdfRect(390, 708, 163, 4, "1 0.8 0"),
+    drawPdfStrokeRect(390, 658, 163, 54),
+    "0.36 0.36 0.36 rg\n",
+    writePdfText("AMOUNT PAID", 56, 692, 7, "F2"),
+    writePdfText("STATUS", 230, 692, 7, "F2"),
+    writePdfText("PAYMENT", 404, 692, 7, "F2"),
     "0.07 0.07 0.07 rg\n",
-    writePdfText("LINE ITEM", 44, 564, 9, "F2"),
-    drawPdfRect(44, 532, 507, 22, "0.95 0.95 0.92"),
+    writePdfText(truncatePdfText(amount, 20), 56, 672, 14, "F2"),
+    writePdfText(status, 230, 674, 10, "F2"),
+    writePdfText(truncatePdfText(paymentMethod, 24), 404, 674, 10, "F2"),
+
+    writePdfText("CUSTOMER", 42, 632, 8, "F2"),
+    writePdfText("SERVICE", 320, 632, 8, "F2"),
+    "0.36 0.36 0.36 rg\n",
+    writePdfText(truncatePdfText(transaction.customerName, 44), 42, 612, 10, "F2"),
+    writePdfText(`Primary MSISDN: ${truncatePdfText(transaction.primaryMsisdn, 22)}`, 42, 596, 8),
+    writePdfText(`Reference: ${truncatePdfText(serviceRef, 28)}`, 42, 582, 8),
+    writePdfText(truncatePdfText(transaction.bundleName, 38), 320, 612, 10, "F2"),
+    writePdfText(`Payment method: ${truncatePdfText(paymentMethod, 22)}`, 320, 596, 8),
+    writePdfText(`Transaction status: ${truncatePdfText(status, 22)}`, 320, 582, 8),
+    drawPdfLine(42, 560, 553, 560),
+
     "0.07 0.07 0.07 rg\n",
-    writePdfText("Description", 54, 539, 8, "F2"),
-    writePdfText("Reference", 296, 539, 8, "F2"),
-    writePdfRightText("Amount", 538, 539, 8, "F2"),
-    drawPdfLine(44, 532, 551, 532),
-    writePdfText(truncatePdfText(transaction.bundleName, 42), 54, 512, 9),
-    writePdfText(truncatePdfText(transaction.primaryMsisdn, 22), 296, 512, 9),
-    writePdfRightText(formatUgx(transaction.amountUgx), 538, 512, 9, "F2"),
-    drawPdfLine(44, 496, 551, 496),
-    writePdfRightText("Total paid", 456, 474, 9, "F2"),
-    writePdfRightText(formatUgx(transaction.amountUgx), 538, 474, 11, "F2"),
-    drawPdfLine(44, 450, 551, 450),
+    writePdfText("LINE ITEM", 42, 536, 8, "F2"),
+    drawPdfRect(42, 502, 511, 22, "0.96 0.95 0.9"),
     "0.07 0.07 0.07 rg\n",
-    writePdfText("TRANSACTION DETAILS", 44, 428, 9, "F2"),
+    writePdfText("Description", 54, 509, 7, "F2"),
+    writePdfText("Reference", 300, 509, 7, "F2"),
+    writePdfRightText("Amount", 540, 509, 7, "F2"),
+    drawPdfStrokeRect(42, 466, 511, 58),
+    writePdfText(truncatePdfText(transaction.bundleName, 45), 54, 482, 8),
+    writePdfText(truncatePdfText(transaction.primaryMsisdn, 22), 300, 482, 8),
+    writePdfRightText(amount, 540, 482, 8, "F2"),
+    drawPdfLine(42, 466, 553, 466),
+    writePdfRightText("Total paid", 460, 444, 8, "F2"),
+    writePdfRightText(amount, 540, 444, 10, "F2"),
+    drawPdfLine(42, 426, 553, 426),
+
+    "0.07 0.07 0.07 rg\n",
+    writePdfText("TRANSACTION DETAILS", 42, 404, 8, "F2"),
   ];
 
-  const rowY = 408;
+  const rowY = 384;
 
   detailRows.forEach(([label, value], index) => {
-    const x = index % 2 === 0 ? 44 : 300;
-    const y = rowY - Math.floor(index / 2) * 34;
+    const x = index % 2 === 0 ? 42 : 320;
+    const y = rowY - Math.floor(index / 2) * 28;
 
     commands.push("0.36 0.36 0.36 rg\n");
-    commands.push(writePdfText(label, x, y, 7, "F2"));
+    commands.push(writePdfText(label, x, y, 6.5, "F2"));
     commands.push("0.07 0.07 0.07 rg\n");
-    commands.push(writePdfText(truncatePdfText(value, 36), x, y - 13, 8));
+    commands.push(writePdfText(truncatePdfText(value, 36), x, y - 11, 7.5));
   });
 
-  commands.push(drawPdfRect(44, 126, 507, 68, "0.98 0.97 0.93"));
+  commands.push(drawPdfRect(42, 122, 511, 62, "0.99 0.98 0.93"));
+  commands.push(drawPdfStrokeRect(42, 122, 511, 62));
   commands.push("0.07 0.07 0.07 rg\n");
-  commands.push(writePdfText("SUPPORT", 58, 172, 8, "F2"));
-  commands.push(writePdfText("Toll Free: 100", 58, 154, 8));
-  commands.push(writePdfText("Phone: 0771 001 000", 210, 154, 8));
-  commands.push(writePdfText("WhatsApp: +256 772 123 100", 382, 154, 8));
-  commands.push(writePdfText("customerservice.ug@mtn.com", 58, 138, 8));
-  commands.push(writePdfText("Plot 69-71 Jinja Road; P.O Box 24624 Kampala, Uganda", 260, 138, 8));
-  commands.push(drawPdfRect(44, 84, 507, 2, "1 0.8 0"));
+  commands.push(writePdfText("SUPPORT", 56, 166, 7, "F2"));
+  commands.push(writePdfText("Toll Free: 100", 56, 149, 7.5));
+  commands.push(writePdfText("Phone: 0771 001 000", 198, 149, 7.5));
+  commands.push(writePdfText("WhatsApp: +256 772 123 100", 366, 149, 7.5));
+  commands.push(writePdfText("customerservice.ug@mtn.com", 56, 134, 7.5));
+  commands.push(writePdfText("Plot 69-71 Jinja Road; P.O Box 24624 Kampala, Uganda", 258, 134, 7.5));
+  commands.push(drawPdfRect(42, 92, 511, 2, "1 0.8 0"));
   commands.push("0.36 0.36 0.36 rg\n");
-  commands.push(writePdfText("This computer-generated receipt is valid without a signature.", 44, 62, 8));
-  commands.push(writePdfText("Thank you for using MTN Bulk Data Wholesale Service.", 44, 48, 8, "F2"));
+  commands.push(writePdfText("This computer-generated receipt is valid without a signature.", 42, 70, 7.5));
+  commands.push(writePdfText("Thank you for using MTN Bulk Data Wholesale Service.", 42, 56, 8, "F2"));
 
   const stream = commands.join("");
   const objects = [
@@ -267,16 +299,17 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
         --ink: #111111;
         --muted: #666b73;
         --line: #e8e5d7;
-        --paper: #fffdf4;
+        --paper: #fff9df;
+        --surface: #ffffff;
       }
 
       * { box-sizing: border-box; }
       body {
-        background: #f4f2e8;
+        background: #f4f2e9;
         color: var(--ink);
         font-family: "Outfit", "MTNWorkSans", "Work Sans", Arial, sans-serif;
         margin: 0;
-        padding: 16px;
+        padding: 14px;
       }
       .toolbar {
         align-items: center;
@@ -284,20 +317,20 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
         gap: 10px;
         justify-content: flex-end;
         margin: 0 auto 12px;
-        max-width: 760px;
+        max-width: 720px;
       }
       .button {
         align-items: center;
         border: 1px solid rgba(17, 17, 17, 0.14);
-        border-radius: 8px;
+        border-radius: 999px;
         color: var(--ink);
         cursor: pointer;
         display: inline-flex;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
         justify-content: center;
-        min-height: 38px;
-        padding: 9px 14px;
+        min-height: 34px;
+        padding: 8px 14px;
         text-decoration: none;
       }
       .button.primary {
@@ -306,92 +339,110 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
       }
       .button.secondary { background: #ffffff; }
       .receipt {
-        background: #ffffff;
+        background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 10px;
-        box-shadow: 0 18px 56px rgba(17, 17, 17, 0.1);
+        border-radius: 8px;
+        box-shadow: 0 18px 52px rgba(17, 17, 17, 0.1);
         margin: 0 auto;
-        max-width: 760px;
+        max-width: 720px;
         overflow: hidden;
       }
       .brand-band {
-        background: var(--mtn-yellow);
+        background: #ffffff;
+        border-bottom: 1px solid var(--line);
+        border-top: 5px solid var(--mtn-yellow);
         display: grid;
-        gap: 16px;
+        gap: 14px;
         grid-template-columns: 1fr auto;
-        padding: 18px 24px;
+        padding: 14px 20px 12px;
       }
       .logo-box {
         align-items: center;
-        background: #ffffff;
-        border-radius: 8px;
         display: inline-flex;
-        height: 42px;
+        height: 38px;
         justify-content: center;
-        padding: 8px 12px;
-        width: 88px;
+        padding: 0;
+        width: 86px;
       }
-      .logo-box img { display: block; max-height: 26px; max-width: 64px; }
+      .logo-box img { display: block; max-height: 32px; max-width: 82px; }
       h1 {
-        font-size: 22px;
+        font-size: 20px;
         line-height: 1.1;
-        margin: 12px 0 4px;
+        margin: 8px 0 3px;
       }
       .subtitle {
         color: rgba(17, 17, 17, 0.72);
-        font-size: 13px;
+        font-size: 12px;
         margin: 0;
       }
       .receipt-id {
         align-self: start;
-        background: rgba(255, 255, 255, 0.72);
         border: 1px solid rgba(17, 17, 17, 0.12);
-        border-radius: 8px;
-        min-width: 170px;
-        padding: 10px;
+        border-radius: 6px;
+        min-width: 160px;
+        padding: 8px 10px;
         text-align: right;
       }
       .receipt-id span {
         color: rgba(17, 17, 17, 0.62);
         display: block;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
       .receipt-id strong {
         display: block;
-        font-size: 14px;
-        margin-top: 4px;
+        font-size: 13px;
+        margin-top: 3px;
       }
       .summary {
-        background: var(--ink);
-        color: #ffffff;
+        background: #fafaf7;
+        border-bottom: 1px solid var(--line);
+        color: var(--ink);
         display: grid;
-        gap: 14px;
-        grid-template-columns: 1.2fr 0.8fr 0.8fr;
-        padding: 14px 24px;
+        gap: 10px;
+        grid-template-columns: 1fr 1fr 1fr;
+        padding: 12px 20px;
+      }
+      .summary > div {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        min-height: 58px;
+        overflow: hidden;
+        padding: 9px 10px;
+        position: relative;
+      }
+      .summary > div::before {
+        background: var(--mtn-yellow);
+        content: "";
+        height: 3px;
+        left: 0;
+        position: absolute;
+        right: 0;
+        top: 0;
       }
       .summary span {
-        color: rgba(255, 255, 255, 0.64);
+        color: var(--muted);
         display: block;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 800;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
       .summary strong {
         display: block;
-        font-size: 14px;
-        margin-top: 5px;
-      }
-      .summary .amount strong { color: var(--mtn-yellow); font-size: 22px; }
-      .content { padding: 18px 24px 22px; }
-      .section-title {
         font-size: 13px;
+        margin-top: 6px;
+      }
+      .summary .amount strong { color: var(--ink); font-size: 19px; }
+      .content { padding: 14px 20px 16px; }
+      .section-title {
+        font-size: 11px;
         font-weight: 800;
         letter-spacing: 0.08em;
-        margin: 0 0 8px;
+        margin: 0 0 6px;
         text-transform: uppercase;
       }
       table {
@@ -400,71 +451,74 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
       }
       th, td {
         border-bottom: 1px solid var(--line);
-        font-size: 13px;
-        padding: 8px 0;
+        font-size: 12px;
+        padding: 6px 0;
         text-align: left;
         vertical-align: top;
       }
       th {
         color: #000000;
-        font-size: 12px;
+        font-size: 10px;
         font-weight: 800;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        width: 190px;
+        width: 176px;
       }
       tr:last-child th, tr:last-child td { border-bottom: 0; }
       .contacts {
         background: var(--paper);
         border: 1px solid var(--line);
-        border-radius: 8px;
+        border-radius: 6px;
         display: grid;
         gap: 0;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        margin-top: 18px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 12px;
         overflow: hidden;
       }
       .contact-item {
         border-bottom: 1px solid var(--line);
-        min-height: 54px;
-        padding: 10px 12px;
+        min-height: 46px;
+        padding: 8px 10px;
       }
-      .contact-item:nth-child(odd) { border-right: 1px solid var(--line); }
-      .contact-item:nth-last-child(-n + 2) { border-bottom: 0; }
+      .contact-item:not(:nth-child(3n)) { border-right: 1px solid var(--line); }
+      .contact-item:nth-last-child(-n + 3) { border-bottom: 0; }
       .contact-item span {
         color: var(--muted);
         display: block;
-        font-size: 11px;
+        font-size: 9px;
         font-weight: 800;
         letter-spacing: 0.08em;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
         text-transform: uppercase;
       }
       .contact-item strong {
         display: block;
-        font-size: 13px;
-        line-height: 1.4;
+        font-size: 11px;
+        line-height: 1.3;
       }
       .footer {
         color: var(--muted);
-        font-size: 12px;
-        margin-top: 16px;
+        font-size: 11px;
+        margin-top: 12px;
       }
 
       @media (max-width: 720px) {
         body { padding: 10px; }
         .toolbar { flex-wrap: wrap; justify-content: stretch; }
         .button { flex: 1; }
-	        .brand-band, .summary { grid-template-columns: 1fr; padding: 18px; }
+        .brand-band, .summary { grid-template-columns: 1fr; padding: 14px; }
         .receipt-id { text-align: left; }
-	        .content { padding: 18px; }
+        .content { padding: 14px; }
         th { width: 140px; }
         .contacts { grid-template-columns: 1fr; }
-        .contact-item, .contact-item:nth-child(odd) { border-right: 0; }
-        .contact-item:nth-last-child(2) { border-bottom: 1px solid var(--line); }
+        .contact-item, .contact-item:not(:nth-child(3n)) { border-right: 0; }
+        .contact-item:nth-last-child(-n + 3) { border-bottom: 1px solid var(--line); }
+        .contact-item:last-child { border-bottom: 0; }
       }
 
       @media print {
+        @page { size: A4; margin: 8mm; }
+        html, body { min-height: auto; width: auto; }
         body { background: #ffffff; padding: 0; }
         .toolbar { display: none; }
         .receipt {
@@ -472,7 +526,12 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
           border-radius: 0;
           box-shadow: none;
           max-width: none;
+          width: 100%;
         }
+        .brand-band { padding: 10px 0 9px; }
+        .summary { padding: 10px 0; }
+        .content { padding: 10px 0 0; }
+        .footer { margin-top: 10px; }
       }
     </style>
   </head>
@@ -510,7 +569,7 @@ function buildReceiptPreviewHtml(transaction: ReceiptTransaction, pdfUrl: string
       <section class="content">
         <p class="section-title">Transaction details</p>
         <table>${rowsMarkup}</table>
-        <p class="section-title" style="margin-top: 28px;">MTN Uganda support</p>
+        <p class="section-title" style="margin-top: 14px;">MTN Uganda support</p>
         <div class="contacts">${contactMarkup}</div>
         <p class="footer">This receipt confirms the bulk data wholesale transaction recorded in the MTN Bulk Data Wholesale Service console.</p>
       </section>

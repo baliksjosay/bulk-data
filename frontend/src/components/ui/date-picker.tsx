@@ -107,7 +107,7 @@ export function DatePicker({
               type="button"
               disabled={disabled}
               className={cn(
-                "flex h-10 min-w-0 flex-1 items-center justify-start gap-2 rounded-md border border-input bg-transparent px-4 py-2 text-left text-sm font-normal text-foreground shadow-xs transition-[color,box-shadow] outline-none hover:bg-secondary/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30",
+                "flex h-10 min-w-0 flex-1 items-center justify-start gap-2 rounded-md border border-input bg-transparent px-4 py-2 text-left text-sm font-normal text-foreground shadow-xs transition-[color,box-shadow] outline-none hover:bg-secondary/70 focus-visible:border-ink focus-visible:ring-[3px] focus-visible:ring-primary/45 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:focus-visible:border-primary dark:focus-visible:ring-primary/35",
                 !selectedDate && "text-muted-foreground",
                 className,
               )}
@@ -137,7 +137,7 @@ export function DatePicker({
         <button
           type="button"
           className={cn(
-            "inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-border/60 bg-transparent text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+            "inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-border/60 bg-transparent text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 dark:focus-visible:ring-primary/35",
             (!value || disabled) && "invisible pointer-events-none",
           )}
           aria-label={`Clear ${label}`}
